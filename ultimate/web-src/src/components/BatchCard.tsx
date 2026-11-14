@@ -102,9 +102,12 @@ export function BatchCard({
       <div className="batch-head">
         {batch.media?.previewUrl && <img src={batch.media.previewUrl} alt="" />}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="muted small">
-            {when}
-            {author && ` by ${author}`} · {summarize(batch)}
+          <div className="facts">
+            <span>
+              {when}
+              {author && ` by ${author}`}
+            </span>
+            <span>{summarize(batch)}</span>
           </div>
           {batch.title && <strong>{batch.title}</strong>}
           <div className="batch-caption">{batch.caption || <span className="muted">(no caption)</span>}</div>

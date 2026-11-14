@@ -1,17 +1,19 @@
 import { useState } from 'react';
 import type { Agent, Candidate, HuntProgress, LogEntry } from '../../types';
 import { api } from '../../api';
+import { Icon } from '../Icon';
+import { Fold } from '../Sheet';
 import {
   AGENT_STATE, BEST_STATES, PHASE_TEXT, PLATFORM_BADGE, PLATFORM_NAMES, STATUS_TEXT, fmtNumber, fmtTime,
 } from './common';
 
 type Filter = 'best' | 'downloaded' | 'all' | 'rejected';
 
-export function ProgressPanel({ progress, idleText }: { progress: HuntProgress | null; idleText: string }) {
+export function ProgressPanel({ progress }: { progress: HuntProgress | null }) {
   const p = progress;
   const pct = p && p.target ? Math.min(100, (100 * p.downloaded) / p.target) : 0;
   let headline = 'Ready when you are';
-  let subline = idleText;
+  let subline = '';
   if (p?.running) {
     headline = PHASE_TEXT[p.phase] || 'Hunting…';
     if (p.phase === 'searching') headline += ` — ${p.looked_at} of ${p.pool_target}`;
@@ -39,14 +41,14 @@ export function ProgressPanel({ progress, idleText }: { progress: HuntProgress |
     : [];
   return (
     <section className="card hunt-progress">
-      <div className="row" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+      <div className="hunt-top">
         <div className="big-count">
           {p?.downloaded ?? 0}
           <span className="of"> / {p?.target ?? 0}</span>
         </div>
         <div style={{ minWidth: 0 }}>
           <div className="hunt-headline">{headline}</div>
-          <div className="muted small hunt-subline">{subline}</div>
+          {subline && <div className="muted small hunt-subline">{subline}</div>}
         </div>
       </div>
       <div className="progress" role="progressbar" aria-label="Saved" aria-valuenow={p?.downloaded ?? 0} aria-valuemax={p?.target ?? 0}>
@@ -74,9 +76,8 @@ export function AgentsGrid({ agents }: { agents: Agent[] }) {
         return (
           <div key={a.id} className={`card agent agent-${a.state}`}>
             <div className="row" style={{ flexWrap: 'nowrap' }}>
-              <strong className="small">
-                Agent {a.id} · {PLATFORM_NAMES[a.platform] ?? a.platform}
-              </strong>
+              <strong className="small">Agent {a.id}</strong>
+              <span className="muted small">{PLATFORM_NAMES[a.platform] ?? a.platform}</span>
               <span className="spacer" />
               <span className="muted small">{a.found} found</span>
             </div>
@@ -132,7 +133,7 @@ function CandidateCard({
           <span className="reel-thumb-empty" />
         )}
         <span className="badge-pill platform">
-          {(PLATFORM_BADGE[c.platform] || c.platform) + (c.kind === 'image' ? ' · image' : '')}
+          {(PLATFORM_BADGE[c.platform] || c.platform) + (c.kind === 'image' ? ', image' : '')}
         </span>
         {hasScore && (
           <span
@@ -148,7 +149,11 @@ function CandidateCard({
         <p className="reel-caption small" title={c.caption || ''}>
           {c.caption || '(no caption yet)'}
         </p>
-        <div className="muted small">{meta.join(' · ')}</div>
+        <div className="facts">
+          {meta.map((m) => (
+            <span key={String(m)}>{m}</span>
+          ))}
+        </div>
         {look != null && (
           <div className={`look look-${look >= 70 ? 'high' : look >= 40 ? 'mid' : 'low'}`}>
             <span className="look-bar">
@@ -192,7 +197,7 @@ export function Feed({
   onMoreLike,
   onPost,
   onStudio,
-  empty,
+  onLibrary,
 }: {
   modelId: string;
   candidates: Candidate[];
@@ -200,7 +205,7 @@ export function Feed({
   onMoreLike: (c: Candidate) => void;
   onPost: (path: string) => void;
   onStudio: (path: string) => void;
-  empty: React.ReactNode;
+  onLibrary: () => void;
 }) {
   const [filter, setFilter] = useState<Filter>('best');
   const counts = {
@@ -221,17 +226,23 @@ export function Feed({
     ['rejected', 'Skipped'],
   ];
   return (
-    <section className="card">
-      <div className="segmented" role="tablist" style={{ marginBottom: 12 }}>
-        {labels.map(([id, label]) => (
-          <button key={id} role="tab" aria-selected={filter === id} className={filter === id ? 'on' : ''} onClick={() => setFilter(id)}>
-            {label}
-            {counts[id] ? ` · ${counts[id]}` : ''}
-          </button>
-        ))}
+    <section className="card results">
+      <div className="card-head">
+        <div className="segmented" role="tablist">
+          {labels.map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={filter === id} className={filter === id ? 'on' : ''} onClick={() => setFilter(id)}>
+              {label}
+              {counts[id] ? <span className="count">{counts[id]}</span> : null}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="btn small" onClick={onLibrary}>
+          <Icon name="folder" size={14} />
+          Library
+        </button>
       </div>
       {candidates.length === 0 ? (
-        empty
+        <div className="empty">Nothing found yet</div>
       ) : shown.length === 0 ? (
         <p className="muted small">Nothing here yet.</p>
       ) : (
@@ -255,26 +266,24 @@ export function Feed({
 
 export function ActivityLog({ logs, onCopyReport, onOpenLog }: { logs: LogEntry[]; onCopyReport: () => void; onOpenLog: () => void }) {
   return (
-    <details className="card log-panel">
-      <summary>
-        <strong>Activity log</strong>
-      </summary>
-      <div className="row" style={{ margin: '10px 0' }}>
-        <button type="button" className="btn small" onClick={onCopyReport}>
-          Copy report
-        </button>
-        <button type="button" className="btn small" onClick={onOpenLog}>
-          Show log file
-        </button>
-        <span className="muted small">If something isn't working, copy the report and paste it into a chat with Claude.</span>
-      </div>
-      <div className="log">
-        {logs.map((l, i) => (
-          <div key={i} className={l.level === 'warn' ? 'warn' : ''}>
-            <time>{new Date(l.t * 1000).toLocaleTimeString()}</time> {l.text}
-          </div>
-        ))}
-      </div>
-    </details>
+    <section className="card slim log-panel">
+      <Fold title="Activity log" summary={logs.length ? logs[logs.length - 1].text : 'Nothing yet'}>
+        <div className="row">
+          <button type="button" className="btn small" onClick={onCopyReport}>
+            Copy report
+          </button>
+          <button type="button" className="btn small" onClick={onOpenLog}>
+            Show log file
+          </button>
+        </div>
+        <div className="log">
+          {logs.map((l, i) => (
+            <div key={i} className={l.level === 'warn' ? 'warn' : ''}>
+              <time>{new Date(l.t * 1000).toLocaleTimeString()}</time> {l.text}
+            </div>
+          ))}
+        </div>
+      </Fold>
+    </section>
   );
 }

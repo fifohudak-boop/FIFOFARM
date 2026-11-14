@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { LibraryItem, Model } from '../types';
 import { api } from '../api';
 import { formatBytes } from '../format';
+import { Icon } from './Icon';
 
 function Thumb({ model, item }: { model: Model; item: LibraryItem }) {
   // Prefer the small generated thumbnail. If it fails (e.g. ffmpeg unavailable), fall back to the
@@ -16,9 +17,9 @@ function Thumb({ model, item }: { model: Model; item: LibraryItem }) {
       {stage !== 'glyph' ? (
         <img src={src} alt="" loading="lazy" onError={onError} />
       ) : (
-        <span className="lib-thumb-fallback">{item.kind === 'video' ? '▶' : '▣'}</span>
+        <span className="lib-thumb-fallback"><Icon name={item.kind === 'video' ? 'video' : 'image'} size={22} /></span>
       )}
-      {item.kind === 'video' && <span className="lib-play" aria-hidden="true">▶</span>}
+      {item.kind === 'video' && <span className="lib-play" aria-hidden="true"><Icon name="play" size={12} /></span>}
     </span>
   );
 }
@@ -41,9 +42,9 @@ export function LibraryGrid({
           <button key={item.path} type="button" className="lib-item pickable" onClick={() => onPick(item)} title={item.path}>
             <Thumb model={model} item={item} />
             <span className="lib-name">{item.name}</span>
-            <span className="lib-meta muted small">
-              {item.folder ? `${item.folder} · ` : ''}
-              {formatBytes(item.size)}
+            <span className="lib-meta facts">
+              {item.folder && <span>{item.folder}</span>}
+              <span>{formatBytes(item.size)}</span>
             </span>
           </button>
         ) : (
@@ -52,9 +53,9 @@ export function LibraryGrid({
               <Thumb model={model} item={item} />
             </a>
             <span className="lib-name">{item.name}</span>
-            <span className="lib-meta muted small">
-              {item.folder ? `${item.folder} · ` : ''}
-              {formatBytes(item.size)} · {new Date(item.modified * 1000).toLocaleDateString()}
+            <span className="lib-meta facts">
+              <span>{formatBytes(item.size)}</span>
+              <span>{new Date(item.modified * 1000).toLocaleDateString()}</span>
             </span>
             {renderActions && <div className="lib-actions">{renderActions(item)}</div>}
           </div>

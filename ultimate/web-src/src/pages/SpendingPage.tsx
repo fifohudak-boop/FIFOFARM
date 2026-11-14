@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Model, StudioJob, StudioSpending } from '../types';
 import { api } from '../api';
 import { useLive } from '../live';
+import { Icon } from '../components/Icon';
 
 function useMoney(currency: string) {
   return (n: number) => `${currency === 'USD' ? '$' : ''}${n.toFixed(2)}${currency && currency !== 'USD' ? ` ${currency}` : ''}`;
@@ -71,11 +72,10 @@ export function SpendingPage({ model, onSettings }: { model: Model; onSettings: 
 
   return (
     <div>
-      <div className="card-head">
-        <h1>{model.name}'s spending</h1>
-        <div className="row">
+      <header className="page-head">
+        <h1>Spending</h1>
+        <div className="page-actions">
           <label className="row small" style={{ gap: 6, alignItems: 'center' }}>
-            <span className="muted">Period</span>
             <select value={period} onChange={(e) => setPeriod(e.target.value)} aria-label="Spending period">
               <option value="total">All time</option>
               {months.map(([key]) => (
@@ -85,11 +85,11 @@ export function SpendingPage({ model, onSettings }: { model: Model; onSettings: 
               ))}
             </select>
           </label>
-          <button className="btn small" onClick={load}>
-            Refresh
+          <button type="button" className="btn small icon" onClick={load} aria-label="Refresh" title="Refresh">
+            <Icon name="refresh" size={14} />
           </button>
         </div>
-      </div>
+      </header>
 
       {error && <div className="notice error">{error}</div>}
 
@@ -112,14 +112,11 @@ export function SpendingPage({ model, onSettings }: { model: Model; onSettings: 
             <div className="muted small">Average per video</div>
           </div>
         </div>
-        <p className="muted small" style={{ marginBottom: 0 }}>
-          Only {model.name}'s videos, and only the ones that finished — Alibaba charges when a video succeeds, not for
-          failed ones. Prices come from the rates you set in{' '}
+        <div className="spend-foot">
           <button type="button" className="btn link small" onClick={onSettings}>
-            Settings → AI Studio
+            Rates
           </button>
-          .
-        </p>
+        </div>
       </section>
 
       {!isMonth && months.length > 0 && (
@@ -133,7 +130,7 @@ export function SpendingPage({ model, onSettings }: { model: Model; onSettings: 
                   <span className="spend-bar-fill" style={{ width: `${(100 * mo.cost) / maxMonth}%` }} />
                 </span>
                 <span className="spend-bar-value small">
-                  {money(mo.cost)} · {mo.videos}
+                  {money(mo.cost)} <span className="muted">{mo.videos} {mo.videos === 1 ? 'video' : 'videos'}</span>
                 </span>
               </button>
             ))}
@@ -176,8 +173,10 @@ export function SpendingPage({ model, onSettings }: { model: Model; onSettings: 
             {shownJobs.map((job) => (
               <div key={job.id} className="row spend-item">
                 <span className="small">{new Date(job.createdAt).toLocaleDateString()}</span>
-                <span className="small muted">
-                  {job.resolution} · {job.seconds ?? '?'}s · {job.mode === 'reference' ? 'reference' : job.mode}
+                <span className="facts">
+                  <span>{job.resolution}</span>
+                  <span>{job.seconds ?? '?'}s</span>
+                  <span>{job.mode === 'text' ? 'prompt' : job.mode === 'image' ? 'photo' : 'reference'}</span>
                 </span>
                 <span className="small" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {job.prompt || (job.videos[0] ? job.videos[0].split('/').pop() : '')}

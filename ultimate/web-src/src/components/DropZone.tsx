@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { Model } from '../types';
 import { uploadStudioFile } from '../api';
+import { Icon } from './Icon';
 
 type Kind = 'image' | 'video';
 
@@ -73,8 +74,9 @@ async function uploadAll(
   return paths;
 }
 
-// A "+" block: drag pictures or a whole folder onto it (or click to choose), and the files are
-// uploaded into the model's drop area and handed back as paths. Also links to the model's folders.
+// A drop well: drag pictures or a whole folder onto it (or click to choose), and the files are
+// uploaded into the model's drop area and handed back as paths. Its two quieter buttons pick a
+// folder or something already in the model's folders. `compact` shrinks it once something is in.
 export function DropZone({
   model,
   accept,
@@ -84,6 +86,7 @@ export function DropZone({
   onAdd,
   onBrowse,
   disabled,
+  compact = false,
 }: {
   model: Model;
   accept: Kind;
@@ -93,6 +96,7 @@ export function DropZone({
   onAdd: (paths: string[]) => void;
   onBrowse: () => void;
   disabled?: boolean;
+  compact?: boolean;
 }) {
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
@@ -123,52 +127,44 @@ export function DropZone({
   const openFiles = () => !disabled && !busy && fileInput.current?.click();
 
   return (
-    <div className="stack dropzone-wrap">
+    <div className="dropzone-wrap">
       <div
-        className={`dropzone${over ? ' over' : ''}${disabled ? ' disabled' : ''}${busy ? ' busy' : ''}`}
+        className={`dropzone${over ? ' over' : ''}${disabled ? ' disabled' : ''}${busy ? ' busy' : ''}${compact ? ' compact' : ''}`}
         onDragOver={(e) => {
           e.preventDefault();
           if (!disabled && !busy) setOver(true);
         }}
         onDragLeave={() => setOver(false)}
         onDrop={onDrop}
-        onClick={openFiles}
-        role="button"
-        tabIndex={0}
-        aria-label={label}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            openFiles();
-          }
-        }}
       >
-        {busy ? (
-          <span className="small">
-            Uploading {busy.done}/{busy.total}…
-          </span>
-        ) : (
-          <>
-            <span className="dropzone-plus" aria-hidden="true">
-              +
-            </span>
-            <span className="small dropzone-label">{label}</span>
-            {hint && <span className="muted small">{hint}</span>}
-          </>
-        )}
-      </div>
-      <div className="row dropzone-actions">
-        <button type="button" className="btn link small" onClick={openFiles} disabled={disabled || !!busy}>
-          Choose {accept === 'image' ? (multiple ? 'pictures' : 'a picture') : 'a video'}
+        <button type="button" className="dropzone-main" onClick={openFiles} disabled={disabled || !!busy}>
+          {busy ? (
+            <>
+              <span className="spinner" aria-hidden="true" />
+              <span className="dropzone-label">
+                Uploading {busy.done} of {busy.total}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="dropzone-icon" aria-hidden="true">
+                <Icon name={compact ? 'plus' : 'upload'} size={compact ? 14 : 18} />
+              </span>
+              <span className="dropzone-label">{compact ? 'Add more' : label}</span>
+              {hint && !compact && <span className="dropzone-hint">{hint}</span>}
+            </>
+          )}
         </button>
-        {multiple && (
-          <button type="button" className="btn link small" onClick={() => folderInput.current?.click()} disabled={disabled || !!busy}>
-            Choose a folder
+        <div className="dropzone-actions">
+          {multiple && (
+            <button type="button" className="btn small" onClick={() => folderInput.current?.click()} disabled={disabled || !!busy}>
+              Choose a folder
+            </button>
+          )}
+          <button type="button" className="btn small" onClick={onBrowse} disabled={disabled || !!busy}>
+            From {model.name}'s folders
           </button>
-        )}
-        <button type="button" className="btn link small" onClick={onBrowse} disabled={disabled || !!busy}>
-          Browse {model.name}'s folders
-        </button>
+        </div>
       </div>
       {error && <div className="notice error small">{error}</div>}
       <input

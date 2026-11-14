@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Model } from '../types';
 import { initialsOf } from '../format';
+import { Icon } from './Icon';
 
 export function ModelAvatar({ model, size = 28 }: { model: Pick<Model, 'name' | 'color'>; size?: number }) {
   return (
@@ -79,9 +80,7 @@ export function ModelSwitcher({
       >
         <ModelAvatar model={current} />
         <span className="model-chip-name">{current.name}</span>
-        <span className="caret" aria-hidden="true">
-          ▾
-        </span>
+        <Icon name="updown" size={15} className="model-chip-caret" />
       </button>
       {open && (
         <div className="model-menu" id="model-menu">
@@ -102,7 +101,7 @@ export function ModelSwitcher({
                 {hunting === m.id && <span className="chip posting">hunting</span>}
                 {m.id === current.id && (
                   <span className="check-mark" aria-label="current">
-                    ✓
+                    <Icon name="check" size={15} />
                   </span>
                 )}
               </button>
@@ -144,7 +143,8 @@ export function ModelSwitcher({
           ) : (
             <div className="row model-menu-actions">
               <button type="button" className="btn small" onClick={() => setAdding(true)}>
-                + New model
+                <Icon name="plus" size={14} />
+                New model
               </button>
               <span className="spacer" />
               <button
