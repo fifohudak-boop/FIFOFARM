@@ -4,7 +4,10 @@ import type { EditCaptionColor, EditJob, EditOptions, LibraryItem, Model } from 
 import type { Handoff } from '../App';
 import { api, uploadMusic } from '../api';
 import { useLive } from '../live';
+import { CtaButton } from '../components/CtaButton';
+import { Icon } from '../components/Icon';
 import { LibraryPicker } from '../components/LibraryPicker';
+import { Dock, Fold, Step } from '../components/Sheet';
 
 type Caption = { text: string; position: string; size: string; style: string; color: string };
 
@@ -331,7 +334,7 @@ export function EditPage({
       const job = await api.createEdit(model.id, {
         source,
         trimStart,
-        trimEnd: trimEnd || duration,
+        trimEnd: trimEnd || duration || null,
         aspect,
         fill,
         mirror,
@@ -360,12 +363,25 @@ export function EditPage({
   const outLength = (trimEnd - trimStart) / speed;
   const videoUrl = source ? api.libraryFile(model.id, source) : '';
 
+  const ready = !!source && duration > 0;
+  const shapeName = aspect === 'original' ? 'Original shape' : aspect;
+  const fillName = aspect === 'original' ? '' : fill === 'blur' ? 'fit' : 'fill';
+  const usedCaptions = captions.filter((c) => c.text.trim()).length;
+  const soundSummary = [music ? `${music}, ${Math.round(musicVolume * 100)}%` : 'No music', fade ? 'fades' : null]
+    .filter(Boolean)
+    .join(', ');
+  const extrasSummary = [speed === 1 ? 'Normal speed' : `${speed}× speed`, mirror ? 'mirrored' : null].filter(Boolean).join(', ');
+
   return (
     <div>
-      <div className="card-head">
-        <h1>Editor · {model.name}</h1>
-        {source && <span className="muted small">Reel out · {clock(outLength)} · {aspect === 'original' ? 'original' : aspect}</span>}
-      </div>
+      <header className="page-head">
+        <h1>Editing</h1>
+        {source && (
+          <div className="facts">
+            <span>{source.split('/').pop()}</span>
+          </div>
+        )}
+      </header>
 
       {picking && (
         <LibraryPicker
@@ -378,31 +394,13 @@ export function EditPage({
         />
       )}
 
-      {!source ? (
-        <section className="card stack">
-          <div className="empty">
-            <p>Pick a video of {model.name} — a Reel Finder find, an AI Studio video, or a clip in the library.</p>
-            <button className="btn primary" onClick={() => setPicking(true)}>
-              Choose a clip
-            </button>
-          </div>
-        </section>
-      ) : (
-        <div className="edit-grid">
-          {/* ---------- left: the live reel + trim bar ---------- */}
-          <div className="edit-preview">
-            <div className="edit-stage" style={{ aspectRatio: `${aspectWh[0]} / ${aspectWh[1]}` }}>
+      <div className="edit-grid">
+        {/* ---------- left: the live reel and its trim bar ---------- */}
+        <div className="edit-preview">
+          {source ? (
+            <div className="edit-stage" style={{ aspectRatio: `${aspectWh[0]} / ${aspectWh[1]}`, '--ar': aspectWh[0] / aspectWh[1] } as CSSProperties}>
               {showBlur && (
-                <video
-                  ref={bgRef}
-                  key={`bg-${source}`}
-                  className="stage-blur"
-                  src={videoUrl}
-                  muted
-                  playsInline
-                  preload="auto"
-                  style={mirrorStyle}
-                />
+                <video ref={bgRef} key={`bg-${source}`} className="stage-blur" src={videoUrl} muted playsInline preload="auto" style={mirrorStyle} />
               )}
               <video
                 ref={videoRef}
@@ -430,240 +428,297 @@ export function EditPage({
                 onClick={togglePlay}
                 aria-label={playing ? 'Pause' : 'Play the trimmed part'}
               >
-                {playing ? '❚❚' : '►'}
+                <Icon name={playing ? 'pause' : 'play'} size={22} />
               </button>
             </div>
+          ) : (
+            <button type="button" className="stage-empty" onClick={() => setPicking(true)}>
+              <span className="dropzone-icon">
+                <Icon name="video" size={18} />
+              </span>
+              <strong>Choose a clip</strong>
+              <span className="dropzone-hint">from {model.name}'s folders</span>
+            </button>
+          )}
 
-            {duration > 0 && (
-              <TrimBar
-                duration={duration}
-                start={trimStart}
-                end={trimEnd}
-                playhead={playhead}
-                filmstrip={filmstrip}
-                onTrim={(s, e) => {
-                  setTrimStart(s);
-                  setTrimEnd(e);
-                }}
-                onScrub={seek}
-              />
+          {duration > 0 && (
+            <TrimBar
+              duration={duration}
+              start={trimStart}
+              end={trimEnd}
+              playhead={playhead}
+              filmstrip={filmstrip}
+              onTrim={(s, e) => {
+                setTrimStart(s);
+                setTrimEnd(e);
+              }}
+              onScrub={seek}
+            />
+          )}
+        </div>
+
+        {/* ---------- right: the steps, in the order you'd do them ---------- */}
+        <section className="card sheet">
+          <Step
+            n={1}
+            title="Clip"
+            done={ready}
+            aside={
+              source ? (
+                <button type="button" className="btn link small" onClick={() => setPicking(true)}>
+                  Change
+                </button>
+              ) : undefined
+            }
+          >
+            {source ? (
+              <div className="facts">
+                <span>{clock(duration)} long</span>
+                <span>keeping {clock(trimEnd - trimStart)}</span>
+              </div>
+            ) : (
+              <button type="button" className="btn" onClick={() => setPicking(true)}>
+                <Icon name="folder" size={15} />
+                Choose a clip
+              </button>
             )}
+          </Step>
 
-            <div className="row edit-preview-actions">
-              <button className="btn small" onClick={() => setPicking(true)}>
-                Change clip
-              </button>
+          <Step n={2} title="Shape" done={ready}>
+            <div className="segmented wide" role="radiogroup" aria-label="Shape">
+              {(options?.aspects ?? [{ id: '9:16', name: '9:16' }]).map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={aspect === a.id}
+                  className={aspect === a.id ? 'on' : ''}
+                  onClick={() => setAspect(a.id)}
+                  title={a.name}
+                >
+                  {a.id === 'original' ? 'Original' : a.id}
+                </button>
+              ))}
             </div>
-          </div>
-
-          {/* ---------- right: the controls ---------- */}
-          <div className="edit-controls stack">
-            <section className="card stack">
-              <strong className="small">Shape</strong>
-              <div className="chip-row">
-                {(options?.aspects ?? [{ id: '9:16', name: '9:16' }]).map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    className={`choice${aspect === a.id ? ' on' : ''}`}
-                    onClick={() => setAspect(a.id)}
-                    title={a.name}
-                  >
-                    {a.id === 'original' ? 'Original' : a.id}
+            {aspect !== 'original' && (
+              <div className="segmented" role="radiogroup" aria-label="Fit">
+                <button type="button" role="radio" aria-checked={fill === 'crop'} className={fill === 'crop' ? 'on' : ''} onClick={() => setFill('crop')}>
+                  Fill, crop the edges
+                </button>
+                <button type="button" role="radio" aria-checked={fill === 'blur'} className={fill === 'blur' ? 'on' : ''} onClick={() => setFill('blur')}>
+                  Fit, blur the edges
+                </button>
+              </div>
+            )}
+            <Fold title="Speed and mirror" summary={extrasSummary}>
+              <div className="segmented" role="radiogroup" aria-label="Speed">
+                {(options?.speeds ?? [0.5, 1, 1.5, 2]).map((sp) => (
+                  <button key={sp} type="button" role="radio" aria-checked={speed === sp} className={speed === sp ? 'on' : ''} onClick={() => setSpeed(sp)}>
+                    {sp}×
                   </button>
                 ))}
               </div>
-              {aspect !== 'original' && (
-                <div className="chip-row">
-                  <button type="button" className={`choice${fill === 'crop' ? ' on' : ''}`} onClick={() => setFill('crop')}>
-                    Fill (crop edges)
-                  </button>
-                  <button type="button" className={`choice${fill === 'blur' ? ' on' : ''}`} onClick={() => setFill('blur')}>
-                    Fit (blurred edges)
-                  </button>
-                </div>
-              )}
-              <label className="check small">
+              <label className="check">
                 <input type="checkbox" checked={mirror} onChange={(e) => setMirror(e.target.checked)} />
-                <span>Mirror (flip left–right)</span>
+                <span>Mirror left to right</span>
               </label>
-            </section>
+            </Fold>
+          </Step>
 
-            <section className="card stack">
-              <strong className="small">Speed</strong>
-              <div className="chip-row">
-                {(options?.speeds ?? [0.5, 1, 1.5, 2]).map((s) => (
-                  <button key={s} type="button" className={`choice${speed === s ? ' on' : ''}`} onClick={() => setSpeed(s)}>
-                    {s === 1 ? '1× normal' : `${s}×`}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="card stack">
-              <div className="row">
-                <strong className="small">Captions</strong>
-                {captions.length < 5 && (
-                  <button className="btn small" onClick={addCaption}>
-                    + Add caption
-                  </button>
-                )}
-              </div>
-              {captions.map((cap, i) => (
-                <div key={i} className={`caption-edit${active === i ? ' on' : ''}`} onFocusCapture={() => setActive(i)}>
+          <Step
+            n={3}
+            title="Captions"
+            done={usedCaptions > 0}
+            aside={
+              captions.length < 5 ? (
+                <button type="button" className="btn small" onClick={addCaption}>
+                  <Icon name="plus" size={14} />
+                  Add
+                </button>
+              ) : undefined
+            }
+          >
+            {captions.length === 0 && <span className="optional">Optional</span>}
+            {captions.map((cap, i) => (
+              <div key={i} className={`caption-edit${active === i ? ' on' : ''}`} onFocusCapture={() => setActive(i)}>
+                <div className="caption-top">
                   <textarea
+                    className="short"
                     rows={2}
-                    placeholder="Type the caption…"
+                    placeholder="Caption text"
                     value={cap.text}
                     onChange={(e) => setCaption(i, { text: e.target.value })}
+                    aria-label={`Caption ${i + 1}`}
                   />
-                  <div className="chip-row">
-                    {(options?.captionPositions ?? ['top', 'middle', 'bottom']).map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        className={`choice sm${cap.position === p ? ' on' : ''}`}
-                        onClick={() => setCaption(i, { position: p })}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="chip-row">
-                    {(options?.captionSizes ?? ['S', 'M', 'L', 'XL']).map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        className={`choice sm${cap.size === s ? ' on' : ''}`}
-                        onClick={() => setCaption(i, { size: s })}
-                      >
-                        {SIZE_LABEL[s] ?? s}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="chip-row">
-                    {(options?.captionStyles ?? ['outline', 'box', 'plain']).map((st) => (
-                      <button
-                        key={st}
-                        type="button"
-                        className={`choice sm${cap.style === st ? ' on' : ''}`}
-                        onClick={() => setCaption(i, { style: st })}
-                      >
-                        {STYLE_LABEL[st] ?? st}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="row caption-colors">
-                    {colors.map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        className={`swatch${cap.color === c.id ? ' on' : ''}`}
-                        style={{ background: `rgb(${c.rgb.join(',')})` }}
-                        aria-label={c.id}
-                        onClick={() => setCaption(i, { color: c.id })}
-                      />
-                    ))}
-                    <span className="spacer" />
-                    <button className="btn link small" onClick={() => removeCaption(i)}>
-                      Remove
-                    </button>
-                  </div>
+                  <button type="button" className="btn small icon" onClick={() => removeCaption(i)} aria-label="Remove caption" title="Remove">
+                    <Icon name="x" size={14} />
+                  </button>
                 </div>
-              ))}
-            </section>
-
-            <section className="card stack">
-              <strong className="small">Music & sound</strong>
-              <div className="row">
-                <select value={music} onChange={(e) => setMusic(e.target.value)} style={{ flex: 1 }}>
-                  <option value="">No added music</option>
-                  {musicList.map((t) => (
-                    <option key={t.name} value={t.name}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-                <label className="btn small">
-                  Add track
-                  <input
-                    type="file"
-                    accept="audio/*"
-                    style={{ display: 'none' }}
-                    onChange={(e) => e.target.files?.[0] && onMusicFile(e.target.files[0])}
-                  />
-                </label>
-              </div>
-              {music && (
-                <>
-                  <label className="field">
-                    <span className="small">Music volume: {Math.round(musicVolume * 100)}%</span>
-                    <input type="range" min={0} max={1.5} step={0.05} value={musicVolume} onChange={(e) => setMusicVolume(+e.target.value)} />
-                  </label>
-                  <label className="check small">
-                    <input type="checkbox" checked={keepOriginalAudio} onChange={(e) => setKeepOriginalAudio(e.target.checked)} />
-                    <span>Keep the clip's own sound under the music</span>
-                  </label>
-                </>
-              )}
-              <label className="check small">
-                <input type="checkbox" checked={fade} onChange={(e) => setFade(e.target.checked)} />
-                <span>Fade in and out</span>
-              </label>
-            </section>
-
-            {error && <div className="notice error small">{error}</div>}
-            <button className="btn primary big" disabled={busy} onClick={make}>
-              {busy ? 'Starting…' : `Make the reel · ${clock(outLength)}`}
-            </button>
-          </div>
-        </div>
-      )}
-
-      <section className="card" style={{ marginTop: 16 }}>
-        <h2>{model.name}'s reels</h2>
-        {jobs.length === 0 ? (
-          <p className="muted small">Nothing made yet.</p>
-        ) : (
-          <div className="stack">
-            {jobs.map((job) => (
-              <div key={job.id} className="studio-job">
-                {job.file ? (
-                  <img src={api.libraryThumb(model.id, job.file)} alt="" className="studio-thumb" />
-                ) : (
-                  <span className="studio-thumb empty" />
-                )}
-                <div className="account-main">
-                  <div className="account-name">{job.name}</div>
-                  <div className="account-meta">
-                    {STATUS_LABEL[job.status] ?? job.status}
-                    {job.status === 'processing' && ` · ${job.progress}%`}
-                  </div>
-                  {job.error && <div className="batch-error">{job.error}</div>}
-                </div>
-                <div className="account-side stack">
-                  {job.file && (
-                    <div className="row">
-                      <button className="btn primary small" onClick={() => onPost(job.file!)}>
-                        Post
-                      </button>
-                      <button className="btn link small" onClick={() => api.openFolder(job.file!).catch((e) => toast(e.message))}>
-                        Show
-                      </button>
+                <Fold
+                  title="Look"
+                  summary={`${cap.position}, ${(SIZE_LABEL[cap.size] ?? cap.size).toLowerCase()}, ${(STYLE_LABEL[cap.style] ?? cap.style).toLowerCase()}`}
+                >
+                  <div className="caption-opts">
+                    <span className="caption-opt-label">Place</span>
+                    <div className="segmented" role="radiogroup" aria-label="Place">
+                      {(options?.captionPositions ?? ['top', 'middle', 'bottom']).map((pos) => (
+                        <button key={pos} type="button" role="radio" aria-checked={cap.position === pos} className={`cap${cap.position === pos ? ' on' : ''}`} onClick={() => setCaption(i, { position: pos })}>
+                          {pos}
+                        </button>
+                      ))}
                     </div>
-                  )}
-                </div>
+                    <span className="caption-opt-label">Size</span>
+                    <div className="segmented" role="radiogroup" aria-label="Size">
+                      {(options?.captionSizes ?? ['S', 'M', 'L', 'XL']).map((sz) => (
+                        <button key={sz} type="button" role="radio" aria-checked={cap.size === sz} className={cap.size === sz ? 'on' : ''} onClick={() => setCaption(i, { size: sz })}>
+                          {SIZE_LABEL[sz] ?? sz}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="caption-opt-label">Style</span>
+                    <div className="segmented" role="radiogroup" aria-label="Style">
+                      {(options?.captionStyles ?? ['outline', 'box', 'plain']).map((st) => (
+                        <button key={st} type="button" role="radio" aria-checked={cap.style === st} className={cap.style === st ? 'on' : ''} onClick={() => setCaption(i, { style: st })}>
+                          {STYLE_LABEL[st] ?? st}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="caption-opt-label">Colour</span>
+                    <div className="caption-colors">
+                      {colors.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          className={`swatch${cap.color === c.id ? ' on' : ''}`}
+                          style={{ background: `rgb(${c.rgb.join(',')})` }}
+                          aria-label={c.id}
+                          aria-pressed={cap.color === c.id}
+                          onClick={() => setCaption(i, { color: c.id })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </Fold>
               </div>
             ))}
+          </Step>
+
+          <Step n={4} title="Sound" summary={soundSummary} collapsible last>
+            <div className="input-row">
+              <select value={music} onChange={(e) => setMusic(e.target.value)} aria-label="Music">
+                <option value="">No added music</option>
+                {musicList.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              <label className="btn">
+                <Icon name="upload" size={15} />
+                Add a track
+                <input type="file" accept="audio/*" hidden onChange={(e) => e.target.files?.[0] && onMusicFile(e.target.files[0])} />
+              </label>
+            </div>
+            {music && (
+              <>
+                <label className="field">
+                  <span>
+                    Music volume <span className="field-value">{Math.round(musicVolume * 100)}%</span>
+                  </span>
+                  <input type="range" min={0} max={1.5} step={0.05} value={musicVolume} onChange={(e) => setMusicVolume(+e.target.value)} />
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={keepOriginalAudio} onChange={(e) => setKeepOriginalAudio(e.target.checked)} />
+                  <span>Keep the clip's own sound under the music</span>
+                </label>
+              </>
+            )}
+            <label className="check">
+              <input type="checkbox" checked={fade} onChange={(e) => setFade(e.target.checked)} />
+              <span>Fade in and out</span>
+            </label>
+          </Step>
+
+          {error && <div className="notice error">{error}</div>}
+
+          <Dock
+            info={
+              source ? (
+                <>
+                  <span className="dock-figure">{clock(outLength)}</span>
+                  <span className="dock-note">
+                    {[shapeName, fillName, usedCaptions ? `${usedCaptions} caption${usedCaptions > 1 ? 's' : ''}` : null].filter(Boolean).join(', ')}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="dock-figure">No clip yet</span>
+                  <span className="dock-note">Saved to {model.name}'s Edited reels</span>
+                </>
+              )
+            }
+          >
+            <CtaButton
+              icon="clapper"
+              label={busy ? 'Starting…' : !source ? 'Choose a clip first' : 'Make the reel'}
+              win="Ship the reel"
+              busy={busy}
+              disabled={!source}
+              onClick={make}
+            />
+          </Dock>
+        </section>
+      </div>
+
+      <section className="card edit-results">
+        <div className="card-head">
+          <h2>{model.name}'s reels</h2>
+          <button type="button" className="btn small" onClick={onSettings}>
+            <Icon name="folder" size={14} />
+            Folders
+          </button>
+        </div>
+        {jobs.length === 0 ? (
+          <div className="empty">Nothing made yet</div>
+        ) : (
+          <div className="jobs">
+            {jobs.map((job) => {
+              const working = job.status !== 'saved' && job.status !== 'failed';
+              return (
+                <div key={job.id} className="job">
+                  {job.file ? (
+                    <img src={api.libraryThumb(model.id, job.file)} alt="" className="studio-thumb" />
+                  ) : (
+                    <span className={`studio-thumb empty${working ? ' working' : ''}`} />
+                  )}
+                  <div className="job-main">
+                    <div className="job-head">
+                      <span className="job-title">{job.name}</span>
+                      <span className={`chip ${job.status === 'saved' ? 'published' : job.status === 'failed' ? 'failed' : 'posting'}`}>
+                        {working && <span className="spinner" aria-hidden="true" />}
+                        {STATUS_LABEL[job.status] ?? job.status}
+                        {job.status === 'processing' && ` ${job.progress}%`}
+                      </span>
+                    </div>
+                    {job.error && <div className="batch-error">{job.error}</div>}
+                    {job.file && (
+                      <div className="job-actions">
+                        <button type="button" className="btn primary small" onClick={() => onPost(job.file!)}>
+                          <Icon name="send" size={14} />
+                          Post
+                        </button>
+                        <button type="button" className="btn small" onClick={() => api.openFolder(job.file!).catch((e) => toast(e.message))}>
+                          Show
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
-
-      <p className="muted small">
-        <button type="button" className="btn link small" onClick={onSettings}>
-          Model folders
-        </button>
-      </p>
     </div>
   );
 }

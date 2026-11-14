@@ -5,6 +5,9 @@ import { api, uploadMedia } from '../api';
 import { AccountAvatar } from '../components/AccountAvatar';
 import { BatchCard } from '../components/BatchCard';
 import { LibraryPicker } from '../components/LibraryPicker';
+import { CtaButton } from '../components/CtaButton';
+import { Dock, Fold, Step } from '../components/Sheet';
+import { Icon } from '../components/Icon';
 import { isActive } from '../batchStatus';
 import { formatBytes, formatDuration, toLocalInputValue } from '../format';
 
@@ -58,7 +61,6 @@ export function ComposePage({
   const [caption, setCaption] = useState<string>(draft.caption);
   const [title, setTitle] = useState<string>(draft.title);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
-  const [showOverrides, setShowOverrides] = useState(false);
   const [media, setMedia] = useState<MediaState>({ phase: 'empty' });
   const [dragOver, setDragOver] = useState(false);
   const [when, setWhen] = useState<'now' | 'later'>('now');
@@ -224,26 +226,40 @@ export function ComposePage({
     const anyActive = isActive(result);
     return (
       <div>
-        <div className="card-head">
-          <h1>{anyActive ? 'Posting…' : result.scheduleAt ? 'Scheduled' : 'Done'}</h1>
-          <button className="btn primary" onClick={startOver}>
-            New post
-          </button>
-        </div>
+        <header className="page-head">
+          <h1>{anyActive ? 'Posting…' : result.scheduleAt ? 'Scheduled' : 'Posted'}</h1>
+          <div className="page-actions">
+            <button className="btn primary" onClick={startOver}>
+              <Icon name="plus" size={15} />
+              New post
+            </button>
+          </div>
+        </header>
         <BatchCard model={model} batch={result} onChange={setResult} onDeleted={startOver} />
       </div>
     );
   }
 
-  const canPost =
-    !posting &&
-    ready.length > 0 &&
-    media.phase !== 'uploading' &&
-    media.phase !== 'processing' &&
-    (media.phase === 'ready' || caption.trim().length > 0);
+  const preparing = media.phase === 'uploading' || media.phase === 'processing';
+  const canPost = !posting && ready.length > 0 && !preparing && (media.phase === 'ready' || caption.trim().length > 0);
+  const blocker = preparing
+    ? 'Preparing your video…'
+    : media.phase !== 'ready' && !caption.trim()
+      ? 'Add a video or write a caption'
+      : ready.length === 0
+        ? selected.length === 0
+          ? 'Choose accounts to post to'
+          : 'Fix the red notes first'
+        : null;
+  const plural = ready.length === 1 ? '' : 's';
+  const changed = Object.keys(overrides).length;
+  const whenText = new Date(scheduleAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
   return (
     <div>
+      <header className="page-head">
+        <h1>New post</h1>
+      </header>
       {picking && (
         <LibraryPicker
           model={model}
@@ -257,124 +273,139 @@ export function ComposePage({
           onGoLibrary={onGoLibrary}
         />
       )}
-      <section className="card">
-        <div className="card-head">
-          <h2>1. Video</h2>
-          {(media.phase === 'empty' || media.phase === 'failed') && (
-            <button className="btn small" onClick={() => setPicking(true)}>
-              Choose from {model.name}'s library
-            </button>
-          )}
-        </div>
-        {media.phase === 'empty' || media.phase === 'failed' ? (
-          <>
-            <div
-              className={`drop${dragOver ? ' over' : ''}`}
-              role="button"
-              tabIndex={0}
-              onClick={() => fileInput.current?.click()}
-              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileInput.current?.click()}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                const file = e.dataTransfer.files[0];
-                if (file) handleFile(file);
-              }}
-            >
-              <strong>Drop a video here, or click to choose</strong>
-            </div>
-            {media.phase === 'failed' && (
-              <div className="notice error" style={{ marginTop: 10 }}>
-                {media.name}: {media.error}
+      <section className="card sheet">
+        <Step
+          n={1}
+          title="Video"
+          done={media.phase === 'ready'}
+          aside={
+            (media.phase === 'empty' || media.phase === 'failed') && (
+              <button className="btn small" onClick={() => setPicking(true)}>
+                <Icon name="folder" size={14} />
+                From {model.name}'s library
+              </button>
+            )
+          }
+        >
+          {media.phase === 'empty' || media.phase === 'failed' ? (
+            <>
+              <div
+                className={`drop${dragOver ? ' over' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => fileInput.current?.click()}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileInput.current?.click()}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOver(true);
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  const file = e.dataTransfer.files[0];
+                  if (file) handleFile(file);
+                }}
+              >
+                <span className="dropzone-icon" aria-hidden="true">
+                  <Icon name="upload" size={18} />
+                </span>
+                <strong>Drop a video here</strong>
+                <span className="dropzone-hint">or click to choose</span>
               </div>
-            )}
-          </>
-        ) : media.phase === 'uploading' ? (
-          <div>
-            <div className="row">
-              <strong>{media.fraction >= 1 ? `Opening ${media.name}` : `Uploading ${media.name}`}</strong>
-              <span className="muted">{Math.round(media.fraction * 100)}%</span>
-            </div>
-            <div className="progress">
-              <div style={{ width: `${media.fraction * 100}%` }} />
-            </div>
-          </div>
-        ) : media.phase === 'processing' ? (
-          <div>
-            <div className="row">
-              <strong>{media.job.step}…</strong>
-              <span className="muted">{media.job.progress}%</span>
-            </div>
-            <div className="progress">
-              <div style={{ width: `${media.job.progress}%` }} />
-            </div>
-          </div>
-        ) : (
-          <div className="media-ready">
-            {mediaResult?.previewUrl && <img src={mediaResult.previewUrl} alt="" />}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <strong style={{ wordBreak: 'break-all' }}>{media.job.name}</strong>
-              <div className="muted small">
-                {mediaResult?.kind === 'video'
-                  ? `Video · ${formatDuration(mediaResult.durationSeconds ?? 0)} · ${mediaResult.width}×${mediaResult.height} · ${formatBytes(mediaResult.sizeBytes)}`
-                  : `Photo · ${mediaResult?.width}×${mediaResult?.height}`}
-                {mediaResult?.reencoded && ' · converted for all networks'}
+              {media.phase === 'failed' && (
+                <div className="notice error">
+                  {media.name}: {media.error}
+                </div>
+              )}
+            </>
+          ) : media.phase === 'uploading' ? (
+            <div className="working">
+              <div className="row">
+                <strong>{media.fraction >= 1 ? `Opening ${media.name}` : `Uploading ${media.name}`}</strong>
+                <span className="spacer" />
+                <span className="muted">{Math.round(media.fraction * 100)}%</span>
               </div>
-              <button className="btn link small" onClick={() => setMedia({ phase: 'empty' })}>
+              <div className="progress">
+                <div style={{ width: `${media.fraction * 100}%` }} />
+              </div>
+            </div>
+          ) : media.phase === 'processing' ? (
+            <div className="working">
+              <div className="row">
+                <strong>{media.job.step}…</strong>
+                <span className="spacer" />
+                <span className="muted">{media.job.progress}%</span>
+              </div>
+              <div className="progress">
+                <div style={{ width: `${media.job.progress}%` }} />
+              </div>
+            </div>
+          ) : (
+            <div className="media-ready">
+              {mediaResult?.previewUrl && <img src={mediaResult.previewUrl} alt="" />}
+              <div className="media-ready-main">
+                <strong>{media.job.name}</strong>
+                <div className="facts">
+                  {mediaResult?.kind === 'video' ? (
+                    <>
+                      <span>{formatDuration(mediaResult.durationSeconds ?? 0)}</span>
+                      <span>
+                        {mediaResult.width}×{mediaResult.height}
+                      </span>
+                      <span>{formatBytes(mediaResult.sizeBytes)}</span>
+                    </>
+                  ) : (
+                    <span>
+                      Photo, {mediaResult?.width}×{mediaResult?.height}
+                    </span>
+                  )}
+                  {mediaResult?.reencoded && <span>converted for all networks</span>}
+                </div>
+              </div>
+              <button className="btn small" onClick={() => setMedia({ phase: 'empty' })}>
                 Replace
               </button>
             </div>
-          </div>
-        )}
-        <input
-          ref={fileInput}
-          type="file"
-          accept="video/*,image/*"
-          hidden
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            e.target.value = '';
-            if (file) handleFile(file);
-          }}
-        />
-      </section>
+          )}
+          <input
+            ref={fileInput}
+            type="file"
+            accept="video/*,image/*"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) handleFile(file);
+            }}
+          />
+        </Step>
 
-      <section className="card stack">
-        <h2>2. Caption</h2>
-        <textarea
-          value={caption}
-          onChange={(e) => setCaption(e.target.value)}
-          placeholder="Write your caption and #hashtags…"
-          aria-label="Caption"
-        />
-        {needsTitle && (
-          <label className="field">
-            <span>
-              Title
-            </span>
-            <input type="text" value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} />
-          </label>
-        )}
-        {selected.length > 0 && (
-          <div>
-            <button className="btn link small" onClick={() => setShowOverrides((v) => !v)}>
-              {showOverrides ? 'Use the same caption everywhere' : 'Different caption for some accounts…'}
-            </button>
-            {showOverrides &&
-              selected.map((a) => (
-                <label className="field" key={a.id} style={{ marginTop: 10 }}>
+        <Step n={2} title="Caption" done={caption.trim().length > 0}>
+          <textarea
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            placeholder="Write your caption and #hashtags"
+            aria-label="Caption"
+          />
+          {needsTitle && (
+            <label className="field">
+              <span>Title</span>
+              <input type="text" value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} />
+            </label>
+          )}
+          {selected.length > 1 && (
+            <Fold title="A different caption for some accounts" summary={changed ? `${changed} changed` : 'Same everywhere'}>
+              {selected.map((a) => (
+                <label className="field" key={a.id}>
                   <span>
-                    {a.platform} · {a.name}
+                    {a.name}
+                    <span className="field-value">{a.platform}</span>
                   </span>
                   <textarea
-                    style={{ minHeight: 70 }}
+                    className="short"
                     value={overrides[a.id] ?? ''}
-                    placeholder="Same as main caption"
+                    placeholder="Same as the main caption"
                     onChange={(e) =>
                       setOverrides((prev) => {
                         const next = { ...prev };
@@ -386,154 +417,156 @@ export function ComposePage({
                   />
                 </label>
               ))}
-          </div>
-        )}
-      </section>
+            </Fold>
+          )}
+        </Step>
 
-      <section className="card">
-        <div className="card-head">
-          <h2>3. Accounts</h2>
-          {usable.length > 1 && (
-            <div className="row">
-              <button className="btn link small" onClick={() => setUnselected(new Set())}>
-                All
-              </button>
-              <button className="btn link small" onClick={() => setUnselected(new Set(usable.map((a) => a.id)))}>
-                None
+        <Step
+          n={3}
+          title="Accounts"
+          done={ready.length > 0}
+          aside={
+            usable.length > 1 && (
+              <>
+                <button className="btn link small" onClick={() => setUnselected(new Set())}>
+                  All
+                </button>
+                <button className="btn link small" onClick={() => setUnselected(new Set(usable.map((a) => a.id)))}>
+                  None
+                </button>
+              </>
+            )
+          }
+        >
+          {networkGroups.length > 1 && (
+            <div className="network-chips" role="group" aria-label="Select a whole network">
+              {networkGroups.map((g) => {
+                const allOn = g.ids.every((id) => !unselected.has(id));
+                return (
+                  <button
+                    key={g.identifier}
+                    className={`network-chip${allOn ? ' on' : ''}`}
+                    aria-pressed={allOn}
+                    onClick={() =>
+                      setUnselected((prev) => {
+                        const next = new Set(prev);
+                        for (const id of g.ids) {
+                          if (allOn) next.add(id);
+                          else next.delete(id);
+                        }
+                        return next;
+                      })
+                    }
+                  >
+                    {g.name}
+                    <span className="count">{g.ids.length}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {loadError && <div className="notice error">{loadError}</div>}
+          {accounts === null && !loadError && <p className="muted">Loading accounts…</p>}
+          {accounts?.length === 0 && (
+            <div className="empty">
+              <p>{model.name} has no accounts yet.</p>
+              <button className="btn primary" onClick={onGoAccounts}>
+                Add {model.name}'s accounts
               </button>
             </div>
           )}
-        </div>
-        {networkGroups.length > 1 && (
-          <div className="network-chips" role="group" aria-label="Select a whole network">
-            {networkGroups.map((g) => {
-              const allOn = g.ids.every((id) => !unselected.has(id));
+          <div className="account-list">
+            {(accounts ?? []).map((a) => {
+              const p = preview[a.id];
+              const isUsable = a.supported && !a.disabled;
+              const isSelected = isUsable && !unselected.has(a.id);
+              const blocked = isSelected && (p?.problems.length ?? 0) > 0;
               return (
-                <button
-                  key={g.identifier}
-                  className={`network-chip${allOn ? ' on' : ''}`}
-                  onClick={() =>
-                    setUnselected((prev) => {
-                      const next = new Set(prev);
-                      for (const id of g.ids) {
-                        if (allOn) next.add(id);
-                        else next.delete(id);
-                      }
-                      return next;
-                    })
-                  }
+                <label
+                  key={a.id}
+                  className={`account${isUsable ? ' selectable' : ' blocked'}${isSelected && !blocked ? ' selected' : ''}${
+                    blocked ? ' blocked' : ''
+                  }`}
                 >
-                  {g.name} · {g.ids.length}
-                </button>
+                  <input type="checkbox" checked={isSelected} disabled={!isUsable} onChange={() => toggle(a.id)} />
+                  <AccountAvatar name={a.name} picture={a.picture} identifier={a.identifier} />
+                  <span className="account-main">
+                    <span className="account-name">{a.name}</span>
+                    <span className="account-meta">
+                      {a.platform}
+                      {!a.supported && ', post to this one from Postiz'}
+                      {a.disabled && ', disabled in the posting engine'}
+                    </span>
+                    {isSelected && p?.problems.map((msg) => <span key={msg} className="batch-error">{msg}</span>)}
+                    {isSelected &&
+                      p?.warnings.map((msg) => (
+                        <span key={msg} className="account-warn">
+                          {msg}
+                        </span>
+                      ))}
+                  </span>
+                  {isSelected && p && p.max > 0 && (
+                    <span className="account-side">
+                      <span className={p.over ? 'account-warn' : 'muted'}>
+                        {p.length}/{p.max}
+                      </span>
+                      {p.willShorten && <span className="account-warn">will be shortened</span>}
+                    </span>
+                  )}
+                </label>
               );
             })}
           </div>
-        )}
-        {loadError && <div className="notice error">{loadError}</div>}
-        {accounts === null && !loadError && <p className="muted">Loading accounts…</p>}
-        {accounts?.length === 0 && (
-          <div className="empty">
-            <p>{model.name} has no accounts yet.</p>
-            <button className="btn primary" onClick={onGoAccounts}>
-              Add {model.name}'s accounts
+        </Step>
+
+        <Step n={4} title="When" done last>
+          <div className="segmented" role="group" aria-label="When to post">
+            <button className={when === 'now' ? 'on' : ''} onClick={() => setWhen('now')}>
+              Right now
+            </button>
+            <button className={when === 'later' ? 'on' : ''} onClick={() => setWhen('later')}>
+              Schedule
             </button>
           </div>
-        )}
-        <div className="account-list">
-          {(accounts ?? []).map((a) => {
-            const p = preview[a.id];
-            const isUsable = a.supported && !a.disabled;
-            const isSelected = isUsable && !unselected.has(a.id);
-            const blocked = isSelected && (p?.problems.length ?? 0) > 0;
-            return (
-              <label
-                key={a.id}
-                className={`account${isUsable ? ' selectable' : ' blocked'}${isSelected && !blocked ? ' selected' : ''}${
-                  blocked ? ' blocked' : ''
-                }`}
-              >
-                <input type="checkbox" checked={isSelected} disabled={!isUsable} onChange={() => toggle(a.id)} />
-                <AccountAvatar name={a.name} picture={a.picture} identifier={a.identifier} />
-                <span className="account-main">
-                  <span className="account-name">{a.name}</span>
-                  <span className="account-meta">
-                    {a.platform}
-                    {!a.supported && ' · post to this one from Postiz'}
-                    {a.disabled && ' · disabled in the posting engine'}
-                  </span>
-                  {isSelected && p?.problems.map((msg) => <span key={msg} className="batch-error" style={{ display: 'block' }}>{msg}</span>)}
-                  {isSelected &&
-                    p?.warnings.map((msg) => (
-                      <span key={msg} className="small" style={{ display: 'block', color: 'var(--warn)' }}>
-                        {msg}
-                      </span>
-                    ))}
-                </span>
-                {isSelected && p && p.max > 0 && (
-                  <span className="account-side">
-                    <span style={{ color: p.over ? 'var(--warn)' : 'var(--muted)' }}>
-                      {p.length}/{p.max}
-                    </span>
-                    {p.willShorten && (
-                      <span className="small" style={{ display: 'block', color: 'var(--warn)' }}>
-                        will be shortened
-                      </span>
-                    )}
-                  </span>
-                )}
-              </label>
-            );
-          })}
-        </div>
-      </section>
+          {when === 'later' && (
+            <label className="field">
+              <span>Date and time</span>
+              <input
+                type="datetime-local"
+                value={scheduleAt}
+                min={toLocalInputValue(new Date())}
+                onChange={(e) => setScheduleAt(e.target.value)}
+              />
+            </label>
+          )}
+        </Step>
 
-      <section className="card stack">
-        <h2>4. When</h2>
-        <div className="segmented" role="group" aria-label="When to post">
-          <button className={when === 'now' ? 'on' : ''} onClick={() => setWhen('now')}>
-            Right now
-          </button>
-          <button className={when === 'later' ? 'on' : ''} onClick={() => setWhen('later')}>
-            Schedule
-          </button>
-        </div>
-        {when === 'later' && (
-          <label className="field">
-            <span>Date and time</span>
-            <input
-              type="datetime-local"
-              value={scheduleAt}
-              min={toLocalInputValue(new Date())}
-              onChange={(e) => setScheduleAt(e.target.value)}
-            />
-          </label>
+        {skipped.length > 0 && (
+          <div className="notice warn">
+            {skipped.length === 1 ? '1 selected account will be skipped' : `${skipped.length} selected accounts will be skipped`}. See the red
+            notes in step 3.
+          </div>
         )}
-      </section>
+        {postError && <div className="notice error">{postError}</div>}
 
-      {skipped.length > 0 && (
-        <div className="notice warn" style={{ marginBottom: 12 }}>
-          {skipped.length === 1 ? '1 selected account will be skipped' : `${skipped.length} selected accounts will be skipped`}{' '}
-          — see the red notes above.
-        </div>
-      )}
-      {postError && (
-        <div className="notice error" style={{ marginBottom: 12 }}>
-          {postError}
-        </div>
-      )}
-      <button className="btn primary big" disabled={!canPost} onClick={submit}>
-        {posting
-          ? 'Sending…'
-          : media.phase === 'uploading' || media.phase === 'processing'
-            ? 'Preparing your video…'
-            : media.phase !== 'ready' && !caption.trim()
-              ? 'Add a video or write a caption'
-              : ready.length === 0
-                ? selected.length === 0
-                  ? 'Choose accounts to post to'
-                  : 'Fix the red notes above to post'
-                : `${when === 'now' ? 'Post' : 'Schedule'} to ${ready.length} account${ready.length === 1 ? '' : 's'}`}
-      </button>
+        <Dock
+          info={
+            <>
+              <span className="dock-figure">{ready.length ? `${ready.length} account${plural}` : 'No accounts yet'}</span>
+              <span className="dock-note">{when === 'now' ? 'Goes out right now' : `Goes out ${whenText}`}</span>
+            </>
+          }
+        >
+          <CtaButton
+            icon={when === 'now' ? 'send' : 'calendar'}
+            label={posting ? 'Sending…' : blocker ?? `${when === 'now' ? 'Post' : 'Schedule'} to ${ready.length} account${plural}`}
+            win={when === 'now' ? 'Send it live' : 'Set it and forget it'}
+            busy={posting}
+            disabled={!canPost}
+            onClick={submit}
+          />
+        </Dock>
+      </section>
     </div>
   );
 }

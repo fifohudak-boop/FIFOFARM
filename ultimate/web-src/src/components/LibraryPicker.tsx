@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { FolderKind, Library, LibraryItem, Model } from '../types';
 import { api } from '../api';
+import { Icon } from './Icon';
 import { LibraryGrid } from './LibraryGrid';
 import { FOLDER_LABELS } from '../folders';
 
@@ -49,29 +50,29 @@ export function LibraryPicker({
       <div className="modal card stack" role="dialog" aria-modal="true" aria-label={title}>
         <div className="card-head" style={{ marginBottom: 0 }}>
           <h2>{title}</h2>
-          <button className="btn small" onClick={onClose}>
-            Close
+          <button type="button" className="btn small icon" onClick={onClose} aria-label="Close" title="Close">
+            <Icon name="x" size={15} />
           </button>
         </div>
         {kinds.length > 1 && (
-          <div className="segmented" role="tablist">
-            {kinds.map((k) => (
-              <button key={k} role="tab" aria-selected={kind === k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>
-                {FOLDER_LABELS[k]}
-                {library ? ` · ${library[k].items.length}` : ''}
-              </button>
-            ))}
+          <div className="lib-tabs">
+            <div className="segmented" role="tablist" aria-label="Folders">
+              {kinds.map((k) => (
+                <button key={k} type="button" role="tab" aria-selected={kind === k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>
+                  {FOLDER_LABELS[k]}
+                  {library && library[k].items.length > 0 && <span className="count">{library[k].items.length}</span>}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {error && <div className="notice error">{error}</div>}
         {!library && !error && <p className="muted">Loading…</p>}
         {folder && !folder.connected && (
-          <p className="muted">
-            No {FOLDER_LABELS[kind].toLowerCase()} folder connected for {model.name} yet — connect one in Settings → Models.
-          </p>
+          <div className="empty">No folder connected yet</div>
         )}
         {folder && folder.connected && items.length === 0 && (
-          <p className="muted">Nothing here yet ({folder.folder}).</p>
+          <div className="empty">Nothing here yet</div>
         )}
         <div className="modal-scroll">
           <LibraryGrid model={model} items={items} onPick={onPick} />

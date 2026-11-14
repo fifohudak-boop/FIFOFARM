@@ -5,6 +5,8 @@ import { AccountAvatar } from '../components/AccountAvatar';
 import { EngineSetup } from '../components/EngineSetup';
 import { ModelAvatar } from '../components/ModelSwitcher';
 import { FOLDER_LABELS } from '../folders';
+import { Icon } from '../components/Icon';
+import { Fold } from '../components/Sheet';
 
 const COLORS = ['#4f46e5', '#db2777', '#059669', '#d97706', '#0891b2', '#7c3aed', '#dc2626', '#65a30d'];
 const FOLDER_ORDER: FolderKind[] = ['references', 'photos', 'found', 'generated', 'edited'];
@@ -235,15 +237,18 @@ function ModelStudioKeySection({ model, toast }: { model: Model; toast: (m: stri
       active = false;
     };
   }, [model.id]);
-  if (!info) return null;
+  const connected = info ? info.providers.filter((p) => info.keys[p.id]?.connected).length : 0;
   return (
-    <div className="stack">
-      <div className="small" style={{ fontWeight: 600 }}>AI Studio keys</div>
-      {info.providers.map((p) => {
-        const ki = info.keys[p.id];
-        return ki ? <ProviderKeyRow key={p.id} model={model} provider={p} info={ki} onSaved={setInfo} toast={toast} /> : null;
-      })}
-    </div>
+    <Fold title="AI Studio keys" summary={info ? (connected ? `${connected} connected` : 'None yet') : ''}>
+      {info ? (
+        info.providers.map((p) => {
+          const ki = info.keys[p.id];
+          return ki ? <ProviderKeyRow key={p.id} model={model} provider={p} info={ki} onSaved={setInfo} toast={toast} /> : null;
+        })
+      ) : (
+        <p className="muted small">Loading…</p>
+      )}
+    </Fold>
   );
 }
 
@@ -267,15 +272,14 @@ function ModelPostingSection({ model, status, onManage }: { model: Model; status
     };
   }, [model.id, engineOk]);
   return (
-    <div className="stack" style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+    <Fold
+      title="Posting accounts"
+      summary={!engineOk ? 'Engine not connected' : accounts ? (accounts.length ? `${accounts.length}` : 'None yet') : ''}
+    >
       <div className="row">
-        <div className="small">
-          <strong>Posting</strong>{' '}
-          <span className="muted">{engineOk ? 'engine connected · accounts below' : 'engine not connected'}</span>
-        </div>
-        <span className="spacer" />
         <button type="button" className="btn small" onClick={onManage}>
-          Manage accounts…
+          <Icon name="users" size={14} />
+          Manage accounts
         </button>
       </div>
       {!engineOk && (
@@ -295,17 +299,17 @@ function ModelPostingSection({ model, status, onManage }: { model: Model; status
               <AccountAvatar name={a.name} picture={a.picture} identifier={a.identifier} />
               <div className="account-main">
                 <div className="account-name">{a.name}</div>
-                <div className="account-meta">
-                  {a.platform}
-                  {a.profile && ` · @${a.profile}`}
-                  {a.disabled && ' · disabled'}
+                <div className="account-meta facts">
+                  <span>{a.platform}</span>
+                  {a.profile && <span>@{a.profile}</span>}
+                  {a.disabled && <span>Disabled</span>}
                 </div>
               </div>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </Fold>
   );
 }
 
@@ -335,11 +339,11 @@ function ModelSettings({
   useEffect(() => setName(model.name), [model.name]);
   useEffect(() => setTyped(''), [model.id]);
   return (
-    <section className="card stack">
-      <div className="card-head" style={{ marginBottom: 0 }}>
-        <h2 className="row" style={{ gap: 8, margin: 0, alignItems: 'center' }}>
+    <section className="card settings-model">
+      <div className="card-head">
+        <h2 className="row" style={{ gap: 10, margin: 0, alignItems: 'center' }}>
           <ModelAvatar model={model} size={28} /> {model.name}
-          {isCurrent && <span className="chip published">showing now</span>}
+          {isCurrent && <span className="chip published">Showing now</span>}
         </h2>
         {!isCurrent && (
           <button type="button" className="btn small" onClick={onSelect}>
@@ -348,6 +352,17 @@ function ModelSettings({
         )}
       </div>
 
+      <Fold title="Folders" summary={`${FOLDER_ORDER.filter((k) => model.folders[k]).length} of ${FOLDER_ORDER.length} connected`} defaultOpen>
+        {FOLDER_ORDER.map((kind) => (
+          <FolderRow key={kind} model={model} kind={kind} onSaved={onSaved} toast={toast} />
+        ))}
+      </Fold>
+
+      <ModelStudioKeySection model={model} toast={toast} />
+
+      <ModelPostingSection model={model} status={status} onManage={onManageAccounts} />
+
+      <Fold title="Name and colour" summary={model.name}>
       <form
         className="row"
         onSubmit={async (e) => {
@@ -361,7 +376,7 @@ function ModelSettings({
         }}
       >
         <label className="field" style={{ flex: 1 }}>
-          <span className="small">Name</span>
+          <span>Name</span>
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <button className="btn small" disabled={!name.trim() || name.trim() === model.name} style={{ alignSelf: 'flex-end' }}>
@@ -369,9 +384,7 @@ function ModelSettings({
         </button>
       </form>
       <div>
-        <div className="small" style={{ fontWeight: 600, marginBottom: 6 }}>
-          Color
-        </div>
+        <div className="field-label">Colour</div>
         <div className="row color-row">
           {COLORS.map((c) => (
             <button
@@ -386,74 +399,31 @@ function ModelSettings({
           ))}
         </div>
       </div>
+      </Fold>
 
-      <div className="stack" style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-        <div className="small" style={{ fontWeight: 600 }}>
-          Folders
+      <Fold title="Remove model" className="danger-fold">
+        <p className="small">Your files and folders stay where they are. Type {model.name} to confirm.</p>
+        <input type="text" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Type the model's name" />
+        <div className="row">
+          <button type="button" className="btn danger small" disabled={typed.trim() !== model.name} onClick={onDelete}>
+            Remove {model.name}
+          </button>
         </div>
-        {FOLDER_ORDER.map((kind) => (
-          <FolderRow key={kind} model={model} kind={kind} onSaved={onSaved} toast={toast} />
-        ))}
-      </div>
-
-      <div className="stack" style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-        <ModelStudioKeySection model={model} toast={toast} />
-      </div>
-
-      <ModelPostingSection model={model} status={status} onManage={onManageAccounts} />
-
-      <div className="row" style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-        <span className="spacer" />
-        <details className="danger-zone">
-          <summary className="btn danger small">Remove model…</summary>
-          <div className="stack" style={{ marginTop: 8 }}>
-            <p className="small" style={{ margin: 0 }}>
-              Removes {model.name} from Fifofarm Ultimate: its history, analytics and Reel Finder references. Its accounts
-              stay connected (they become "no model") and <strong>your files and folders aren't touched</strong>. Type the
-              name to confirm.
-            </p>
-            <input type="text" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Type the model's name" />
-            <button type="button" className="btn danger small" disabled={typed.trim() !== model.name} onClick={onDelete}>
-              Remove {model.name}
-            </button>
-          </div>
-        </details>
-      </div>
-    </section>
-  );
-}
-
-// AI Studio keys live per model (each model → AI Studio key), so every model bills to its own account
-// and the billing stays separate. There is no shared default key.
-function StudioKeyCard() {
-  return (
-    <section className="card stack" id="studio">
-      <h2>AI Studio keys are per model</h2>
-      <p className="small" style={{ margin: 0 }}>
-        Make keys in the{' '}
-        <a href="https://modelstudio.console.alibabacloud.com/" target="_blank" rel="noreferrer">
-          Model Studio console
-        </a>
-        ; for Wan the key, region and workspace ID must all be from the same account.
-      </p>
+      </Fold>
     </section>
   );
 }
 
 function PostingDefaults({ prefs, save }: { prefs: Preferences; save: (patch: Partial<Preferences>) => void }) {
   return (
-    <>
-      <section className="card stack">
-        <h2>Captions</h2>
+    <section className="card slim">
+      <Fold title="Captions" summary={prefs.autoShorten ? 'Shortened to fit' : 'Left as written'}>
         <label className="check">
           <input type="checkbox" checked={prefs.autoShorten} onChange={(e) => save({ autoShorten: e.target.checked })} />
-          <span>
-            Shorten captions automatically when they're too long for a network (e.g. X's 280 characters)
-          </span>
+          <span>Shorten captions that are too long for a network</span>
         </label>
-      </section>
-      <section className="card stack">
-        <h2>YouTube</h2>
+      </Fold>
+      <Fold title="YouTube" summary={prefs.youtubeVisibility[0].toUpperCase() + prefs.youtubeVisibility.slice(1)}>
         <label className="field">
           <span>Video visibility</span>
           <select value={prefs.youtubeVisibility} onChange={(e) => save({ youtubeVisibility: e.target.value as Preferences['youtubeVisibility'] })}>
@@ -462,9 +432,8 @@ function PostingDefaults({ prefs, save }: { prefs: Preferences; save: (patch: Pa
             <option value="private">Private</option>
           </select>
         </label>
-      </section>
-      <section className="card stack">
-        <h2>TikTok</h2>
+      </Fold>
+      <Fold title="TikTok" summary={prefs.tiktokMode === 'UPLOAD' ? 'Drafts to the inbox' : 'Publish directly'}>
         <label className="field">
           <span>Who can watch</span>
           <select value={prefs.tiktokPrivacy} onChange={(e) => save({ tiktokPrivacy: e.target.value as Preferences['tiktokPrivacy'] })}>
@@ -497,9 +466,8 @@ function PostingDefaults({ prefs, save }: { prefs: Preferences; save: (patch: Pa
           <input type="checkbox" checked={prefs.tiktokAllowStitch} onChange={(e) => save({ tiktokAllowStitch: e.target.checked })} />
           <span>Allow Stitches</span>
         </label>
-      </section>
-      <section className="card stack">
-        <h2>X (Twitter)</h2>
+      </Fold>
+      <Fold title="X (Twitter)">
         <label className="field">
           <span>Who can reply</span>
           <select value={prefs.xWhoCanReply} onChange={(e) => save({ xWhoCanReply: e.target.value as Preferences['xWhoCanReply'] })}>
@@ -509,8 +477,8 @@ function PostingDefaults({ prefs, save }: { prefs: Preferences; save: (patch: Pa
             <option value="verified">Verified accounts</option>
           </select>
         </label>
-      </section>
-    </>
+      </Fold>
+    </section>
   );
 }
 
@@ -536,16 +504,7 @@ function SharingCard({ status, onStatus, toast }: { status: AppStatus; onStatus:
   }
 
   return (
-    <section className="card stack" id="sharing">
-      <div className="card-head" style={{ marginBottom: 0 }}>
-        <h2>Sharing</h2>
-        <span className={`chip ${current.enabled ? 'published' : ''}`}>{current.enabled ? 'on' : 'off'}</span>
-      </div>
-      <p className="small" style={{ margin: 0 }}>
-        Let other people open this dashboard from their own computer and sign in. You choose which models each person
-        sees; everything else (keys, models, prices, these settings) stays yours. On this Mac you're always the owner and
-        never have to log in.
-      </p>
+    <Fold title="Sharing" summary={current.enabled ? `On, ${current.host}` : 'Off'}>
       <label className="field">
         <span>Web address people will use</span>
         <input
@@ -573,7 +532,7 @@ function SharingCard({ status, onStatus, toast }: { status: AppStatus; onStatus:
           </button>
         )}
       </div>
-    </section>
+    </Fold>
   );
 }
 
@@ -615,8 +574,9 @@ function PersonRow({ person, models, onChanged, toast }: { person: Person; model
       <button type="button" className="model-card-head" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="account-main">
           <span className="account-name">{person.name || person.username}</span>
-          <span className="account-meta">
-            @{person.username} · {person.modelNames.length ? person.modelNames.join(', ') : 'no models yet'}
+          <span className="account-meta facts">
+            <span>@{person.username}</span>
+            <span>{person.modelNames.length ? person.modelNames.join(', ') : 'No models yet'}</span>
           </span>
         </span>
         <span className="caret" aria-hidden="true">
@@ -704,12 +664,7 @@ function PeopleCard({ models, toast }: { models: Model[]; toast: (m: string) => 
   const toggle = (id: string) => setPicked((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
 
   return (
-    <section className="card stack" id="people">
-      <h2>People</h2>
-      <p className="small" style={{ margin: 0 }}>
-        Invite people and choose which models each one can use. Give them the web address above, their username and their
-        password, and they sign in from anywhere. On the models you give them they can do everything — post, generate, edit.
-      </p>
+    <Fold title="People" summary={people ? (people.length ? `${people.length}` : 'Only you') : ''}>
 
       {people && people.length > 0 && (
         <div className="stack">
@@ -800,7 +755,7 @@ function PeopleCard({ models, toast }: { models: Model[]; toast: (m: string) => 
           </button>
         </div>
       </form>
-    </section>
+    </Fold>
   );
 }
 
@@ -842,30 +797,31 @@ function GeneralSettings({
         </div>
       )}
 
-      <StudioKeyCard />
-      <FaceFusionCard toast={toast} />
-
-      {prefs ? (
+      {prefs && (
         <>
-          <h2 style={{ margin: '24px 0 12px' }}>Posting defaults</h2>
+          <h2 className="group-title">Posting defaults</h2>
           <PostingDefaults prefs={prefs} save={savePrefs} />
         </>
-      ) : (
-        status.engine.state !== 'ok' && (
-          <p className="muted small">Posting defaults show up once the posting engine is connected.</p>
-        )
       )}
 
-      <SharingCard status={status} onStatus={onStatus} toast={toast} />
-      <PeopleCard models={models} toast={toast} />
-
-      <section className="card stack">
-        <h2>About</h2>
-        <p className="small" style={{ margin: 0 }}>
-          {status.brand} {status.version} · build <span className="mono">{status.build}</span>
-          {status.updateAvailable && <span className="chip posting" style={{ marginLeft: 8 }}>update ready — reopen the app</span>}
-        </p>
+      <h2 className="group-title">AI Studio</h2>
+      <section className="card slim">
+        <FaceFusionCard toast={toast} />
       </section>
+
+      <h2 className="group-title">Sharing</h2>
+      <section className="card slim">
+        <SharingCard status={status} onStatus={onStatus} toast={toast} />
+        <PeopleCard models={models} toast={toast} />
+      </section>
+
+      <footer className="about">
+        <span>
+          {status.brand} {status.version}
+        </span>
+        <span className="mono">build {status.build}</span>
+        {status.updateAvailable && <span className="chip posting">Update ready, reopen the app</span>}
+      </footer>
     </>
   );
 }
@@ -903,14 +859,7 @@ function FaceFusionCard({ toast }: { toast: (m: string) => void }) {
   }
 
   return (
-    <section className="card stack" id="facefusion">
-      <h2>FaceFusion (local face swap)</h2>
-      <p className="muted small" style={{ margin: 0 }}>
-        AI Studio’s “Face swap” provider runs FaceFusion on this Mac — free, no API key. Install FaceFusion, then paste
-        the command that runs it: everything <em>before</em> the arguments, e.g.{' '}
-        <span className="mono">/Users/you/facefusion/.venv/bin/python /Users/you/facefusion/facefusion.py</span>. Leave
-        it blank to use a <span className="mono">facefusion</span> command on your PATH.
-      </p>
+    <Fold title="FaceFusion face swap" summary={loaded ? (ready ? 'Found' : 'Not set up') : ''}>
       <label className="field">
         <span className="small">FaceFusion command</span>
         <input
@@ -926,9 +875,9 @@ function FaceFusionCard({ toast }: { toast: (m: string) => void }) {
         <button className="btn primary small" onClick={save} disabled={busy || !loaded}>
           Save
         </button>
-        {loaded && <span className={ready ? 'chip published' : 'chip'}>{ready ? 'FaceFusion found ✓' : 'not found yet'}</span>}
+        {loaded && <span className={ready ? 'chip published' : 'chip'}>{ready ? 'Found' : 'Not found yet'}</span>}
       </div>
-    </section>
+    </Fold>
   );
 }
 
@@ -981,21 +930,22 @@ export function SettingsPage({
 
   return (
     <div>
-      <h1>Settings</h1>
+      <header className="page-head">
+        <h1>Settings</h1>
+      </header>
       {error && <div className="notice error">{error}</div>}
 
-      <div className="row settings-picker" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 16, alignItems: 'center' }}>
-        {models.map((mo) => (
-          <button
-            key={mo.id}
-            type="button"
-            className={`btn small${view === mo.id ? ' primary' : ''}`}
-            onClick={() => setView(mo.id)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <ModelAvatar model={mo} size={18} /> {mo.name}
+      <div className="settings-picker">
+        <div className="segmented" role="tablist" aria-label="Settings for">
+          {models.map((mo) => (
+            <button key={mo.id} type="button" role="tab" aria-selected={view === mo.id} className={view === mo.id ? 'on' : ''} onClick={() => setView(mo.id)}>
+              <ModelAvatar model={mo} size={18} /> {mo.name}
+            </button>
+          ))}
+          <button type="button" role="tab" aria-selected={view === 'general'} className={view === 'general' ? 'on' : ''} onClick={() => setView('general')}>
+            <Icon name="sliders" size={14} /> General
           </button>
-        ))}
+        </div>
         {adding ? (
           <form
             onSubmit={async (e) => {
@@ -1027,17 +977,10 @@ export function SettingsPage({
           </form>
         ) : (
           <button type="button" className="btn small" onClick={() => setAdding(true)}>
-            + Add model
+            <Icon name="plus" size={14} />
+            Add model
           </button>
         )}
-        <span className="spacer" />
-        <button
-          type="button"
-          className={`btn small${view === 'general' ? ' primary' : ''}`}
-          onClick={() => setView('general')}
-        >
-          General
-        </button>
       </div>
 
       {selected ? (

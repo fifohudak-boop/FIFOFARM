@@ -4,6 +4,8 @@ import type { Handoff } from '../App';
 import { api } from '../api';
 import { LibraryGrid } from '../components/LibraryGrid';
 import { FOLDER_LABELS } from '../folders';
+import { Icon } from '../components/Icon';
+import { MoreMenu, type MenuAction } from '../components/MoreMenu';
 
 const KINDS: FolderKind[] = ['found', 'generated', 'edited', 'references', 'photos'];
 
@@ -47,94 +49,81 @@ export function LibraryPage({
 
   const folder = library?.[kind];
 
+  const empty =
+    kind === 'found' ? 'Nothing found yet' : kind === 'generated' ? 'Nothing made yet' : kind === 'edited' ? 'No edited reels yet' : 'This folder is empty';
+
   return (
     <div>
-      <div className="card-head">
-        <h1>{model.name}'s library</h1>
-        <div className="row">
+      <header className="page-head">
+        <h1>Library</h1>
+        <div className="page-actions">
           {folder?.connected && (
-            <button className="btn small" onClick={() => api.openFolder(folder.folder).catch((e) => toast(e.message))}>
+            <button type="button" className="btn small" onClick={() => api.openFolder(folder.folder).catch((e) => toast(e.message))}>
+              <Icon name="external" size={14} />
               Open in Finder
             </button>
           )}
-          <button className="btn small" onClick={load}>
-            Refresh
+          <button type="button" className="btn small icon" onClick={load} aria-label="Refresh" title="Refresh">
+            <Icon name="refresh" size={14} />
           </button>
         </div>
-      </div>
-      <div className="segmented" role="tablist" style={{ marginBottom: 14 }}>
-        {KINDS.map((k) => (
-          <button key={k} role="tab" aria-selected={kind === k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>
-            {FOLDER_LABELS[k]}
-            {library ? ` · ${library[k].items.length}` : ''}
-          </button>
-        ))}
+      </header>
+      <div className="lib-tabs">
+        <div className="segmented" role="tablist" aria-label="Folders">
+          {KINDS.map((k) => (
+            <button key={k} type="button" role="tab" aria-selected={kind === k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>
+              {FOLDER_LABELS[k]}
+              {library && library[k].items.length > 0 && <span className="count">{library[k].items.length}</span>}
+            </button>
+          ))}
+        </div>
       </div>
       {error && <div className="notice error">{error}</div>}
       {!library && !error && <p className="muted">Loading…</p>}
       {folder && (
-        <section className="card stack">
-          {folder.connected && (
-            <p className="muted small mono" style={{ margin: 0 }}>
-              {folder.folder}
-            </p>
-          )}
+        <section className="card">
           {!folder.connected ? (
             <div className="empty">
-              <p>No folder connected for this yet.</p>
-              <button className="btn primary" onClick={onSettings}>
-                Connect a folder
-              </button>
+              No folder connected yet
+              <div>
+                <button type="button" className="btn" onClick={onSettings}>
+                  <Icon name="folder" size={15} />
+                  Connect a folder
+                </button>
+              </div>
             </div>
           ) : folder.items.length === 0 ? (
-            <div className="empty">
-              <p>
-                {kind === 'found'
-                  ? `Nothing yet — start a hunt in Reel Finder and the best videos land here.`
-                  : kind === 'generated'
-                    ? 'Nothing yet — what AI Studio makes for this model lands here.'
-                    : 'This folder has no videos or pictures yet.'}
-              </p>
-            </div>
+            <div className="empty">{empty}</div>
           ) : (
             <LibraryGrid
               model={model}
               items={folder.items}
-              renderActions={(item) => (
-                <>
-                  <span className="row lib-buttons">
-                    <button className="btn primary small" onClick={() => onPost(item.path)}>
+              renderActions={(item) => {
+                const more: MenuAction[] = [
+                  {
+                    label: 'Use in AI Studio',
+                    icon: 'sparkles',
+                    onSelect: () => onStudio(item.kind === 'video' ? 'studio-video' : 'studio-photo', item.path),
+                  },
+                ];
+                if (onEdit && item.kind === 'video') more.push({ label: 'Edit', icon: 'scissors', onSelect: () => onEdit(item.path) });
+                if (item.kind === 'video' && kind !== 'photos')
+                  more.push({
+                    label: 'Find more like it',
+                    icon: 'radar',
+                    onSelect: () => onReference(item.path).catch((e) => toast((e as Error).message)),
+                  });
+                more.push({ label: 'Show in Finder', icon: 'external', onSelect: () => api.openFolder(item.path).catch((e) => toast(e.message)) });
+                return (
+                  <>
+                    <button type="button" className="btn primary small" onClick={() => onPost(item.path)}>
+                      <Icon name="send" size={14} />
                       Post
                     </button>
-                    <button
-                      className="btn small"
-                      onClick={() => onStudio(item.kind === 'video' ? 'studio-video' : 'studio-photo', item.path)}
-                      title="Use it in AI Studio"
-                    >
-                      AI Studio
-                    </button>
-                    {onEdit && item.kind === 'video' && (
-                      <button className="btn small" onClick={() => onEdit(item.path)} title="Open it in the editor">
-                        Edit
-                      </button>
-                    )}
-                  </span>
-                  <span className="row lib-links">
-                    {item.kind === 'video' && kind !== 'photos' && (
-                      <button
-                        className="btn link small"
-                        onClick={() => onReference(item.path).catch((e) => toast((e as Error).message))}
-                        title="Add it as a Reel Finder reference: the next hunt finds videos that look like this one"
-                      >
-                        More like it
-                      </button>
-                    )}
-                    <button className="btn link small" onClick={() => api.openFolder(item.path).catch((e) => toast(e.message))}>
-                      Show in Finder
-                    </button>
-                  </span>
-                </>
-              )}
+                    <MoreMenu label={`More for ${item.name}`} actions={more} />
+                  </>
+                );
+              }}
             />
           )}
         </section>

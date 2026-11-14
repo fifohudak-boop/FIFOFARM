@@ -6,6 +6,9 @@ import { api } from '../api';
 import { useLive } from '../live';
 import { copyText } from '../clipboard';
 import { LibraryPicker } from '../components/LibraryPicker';
+import { CtaButton } from '../components/CtaButton';
+import { Dock, Fold, Step } from '../components/Sheet';
+import { Icon } from '../components/Icon';
 import { ReferencesPanel } from '../components/reels/References';
 import { ActivityLog, AgentsGrid, Feed, ProgressPanel } from '../components/reels/LiveView';
 import { PLATFORM_NAMES, RECOMMENDED_MODELS, autoPool } from '../components/reels/common';
@@ -38,7 +41,7 @@ function NumberField({
 }) {
   return (
     <label className="field">
-      <span className="small">{label}</span>
+      <span>{label}</span>
       <input
         type="number"
         min={min}
@@ -59,14 +62,17 @@ function SelfTestPanel({ test, onClose, onCopyReport }: { test: SelfTestState; o
     <section className="card stack" aria-live="polite">
       <div className="card-head" style={{ marginBottom: 0 }}>
         <h2>
-          {PLATFORM_NAMES[test.platform]} self-test · searching “{test.query}”{test.running ? '' : ' · done'}
+          {PLATFORM_NAMES[test.platform]} self-test
+          <span className="h-note">
+            searching “{test.query}”{test.running ? '' : ', done'}
+          </span>
         </h2>
         <div className="row">
           <button className="btn small" onClick={onCopyReport}>
             Copy report
           </button>
-          <button className="btn small" onClick={onClose} aria-label="Close self-test">
-            Close
+          <button className="btn small icon" onClick={onClose} aria-label="Close self-test">
+            <Icon name="x" size={14} />
           </button>
         </div>
       </div>
@@ -103,6 +109,7 @@ export function ReelFinderPage({
   onPost,
   onStudio,
   onSettings,
+  onLibrary,
 }: {
   model: Model;
   status: ReelsStatus | null;
@@ -111,6 +118,7 @@ export function ReelFinderPage({
   onPost: (path: string) => void;
   onStudio: (path: string) => void;
   onSettings: () => void;
+  onLibrary: () => void;
 }) {
   const [settings, setSettings] = useState<HuntSettings | null>(null);
   const [references, setReferences] = useState<Map<string, Reference>>(new Map());
@@ -344,9 +352,9 @@ export function ReelFinderPage({
     const installed = ollama?.models ?? [];
     const names = new Set(installed.map((m) => m.name));
     const list = installed.map((m) => ({ value: m.name, label: `${m.name}${m.vision ? ' · sees images' : ' · text only'}` }));
-    for (const r of RECOMMENDED_MODELS) if (!names.has(r.name)) list.push({ value: r.name, label: `${r.name} · not installed` });
+    for (const r of RECOMMENDED_MODELS) if (!names.has(r.name)) list.push({ value: r.name, label: `${r.name} (not installed)` });
     if (settings?.model && !list.some((o) => o.value === settings.model)) {
-      list.push({ value: settings.model, label: `${settings.model} · not installed` });
+      list.push({ value: settings.model, label: `${settings.model} (not installed)` });
     }
     return list;
   }, [ollama?.models, settings?.model]);
@@ -370,46 +378,63 @@ export function ReelFinderPage({
 
   if (!settings) return <p className="muted">Loading…</p>;
 
-  const pills = (
-    <div className="pills">
+  const health = (
+    <div className="statuses">
       {!ollama ? null : !ollama.running ? (
-        <span className="chip draft" title="Start Ollama to let the AI judge videos">
-          AI off — keyword mode
+        <span className="status off" title="Start Ollama to let the AI judge videos">
+          AI off, keyword mode
         </span>
       ) : !chosenInstalled ? (
-        <span className="chip draft">AI model missing</span>
+        <span className="status warn">AI model missing</span>
       ) : (
-        <span className="chip published">AI: {settings.model}</span>
+        <span className="status ok">AI {settings.model}</span>
       )}
-      {status && (status.ffmpeg ? <span className="chip published">ffmpeg</span> : <span className="chip failed">ffmpeg missing</span>)}
+      {status && (status.ffmpeg ? <span className="status ok">ffmpeg</span> : <span className="status bad">ffmpeg missing</span>)}
       {status &&
-        (!status.similarity.installed ? (
-          <span className="chip draft">Look-matching off</span>
-        ) : status.similarity.error ? (
-          <span className="chip draft" title={status.similarity.error}>
+        (!status.similarity.installed || status.similarity.error ? (
+          <span className="status off" title={status.similarity.error || undefined}>
             Look-matching off
           </span>
         ) : (
-          <span className="chip published">Look-matching</span>
+          <span className="status ok">Look-matching</span>
         ))}
     </div>
   );
 
+  // What each folded group is currently set to, so it can stay closed.
+  const wordsSummary =
+    [settings.keywords.trim() && `must mention ${settings.keywords.trim()}`, settings.exclude.trim() && `skips ${settings.exclude.trim()}`]
+      .filter(Boolean)
+      .join(', ') || 'None';
+  const depthSummary = `${settings.pool_size || `auto (${autoPool(settings.target_count || 20)})`} looked at, ${settings.time_limit_min} min, ${settings.agents} agent${settings.agents === 1 ? '' : 's'}`;
+  const filterSummary =
+    [
+      (settings.min_duration || settings.max_duration) &&
+        `${settings.min_duration || 0}${settings.max_duration ? `–${settings.max_duration}` : '+'} s`,
+      settings.min_views && `${settings.min_views.toLocaleString()}+ views`,
+      settings.min_likes && `${settings.min_likes.toLocaleString()}+ likes`,
+      settings.max_age_days && `last ${settings.max_age_days} days`,
+    ]
+      .filter(Boolean)
+      .join(', ') || 'None';
+  const aiSummary = !ollama?.running
+    ? 'Off, matching by keywords'
+    : `${settings.model}${settings.min_score ? `, score ${settings.min_score}+` : ''}${settings.watch_check ? ', watch-check' : ''}`;
+  const saveSummary = `${settings.output_dir.split('/').filter(Boolean).pop() ?? 'Found videos'}${settings.subfolder_per_hunt ? ', a subfolder per hunt' : ''}`;
+  const platformNames = PLATFORMS.filter((p) => settings.platforms.includes(p.id)).map((p) => PLATFORM_NAMES[p.id]);
+
   return (
     <div>
-      <div className="card-head">
-        <h1>Reel Finder · {model.name}</h1>
-        {pills}
-      </div>
+      <header className="page-head">
+        <h1>Reel Finder</h1>
+        {health}
+      </header>
       {huntingElsewhere && (
-        <div className="notice info small" style={{ marginBottom: 12 }}>
-          Another model's hunt is running — one hunt at a time (they share the agents' browser). You can set this one up
-          meanwhile.
-        </div>
+        <div className="notice info">Another model's hunt is running, and only one runs at a time. You can set this one up meanwhile.</div>
       )}
       {status && !anyLogin && !running && (
-        <div className="notice warn" style={{ marginBottom: 12 }}>
-          <strong>Log in before you hunt.</strong> Press <b>Connect</b> next to a platform under <b>Where to search</b>.
+        <div className="notice warn">
+          <strong>Log in before you hunt.</strong> Press Connect next to a platform in step 2.
           {status.canImportLogins && (
             <>
               {' '}
@@ -425,7 +450,7 @@ export function ReelFinderPage({
         <LibraryPicker
           model={model}
           kinds={['references', 'found', 'generated']}
-          title={`Use as a reference — ${model.name}'s folders`}
+          title={`Use as a reference, from ${model.name}'s folders`}
           onPick={async (item) => {
             setPicking(false);
             try {
@@ -447,273 +472,285 @@ export function ReelFinderPage({
             start();
           }}
         >
-          <ReferencesPanel
-            model={model}
-            references={references}
-            setReferences={setReferences}
-            closeness={settings.closeness}
-            onCloseness={(v) => update({ closeness: v })}
-            onFromLibrary={() => setPicking(true)}
-            toast={toast}
-          />
-
-          <section className="card stack">
-            <label className="field">
-              <span>{refsList.length ? 'Anything to add? (optional)' : 'What are you looking for?'}</span>
-              <textarea
-                rows={4}
-                value={settings.description}
-                onChange={(e) => update({ description: e.target.value })}
-                placeholder={
-                  refsList.length
-                    ? 'e.g. only night shots, no talking — or leave empty and let the reference speak'
-                    : 'e.g. Cinematic slow-motion car drifts at night with smoke, no talking, filmed from low angles'
-                }
+          <section className="card sheet">
+            <Step n={1} title="Show what you want" done={readyRefs || settings.description.trim().length > 0}>
+              <ReferencesPanel
+                model={model}
+                references={references}
+                setReferences={setReferences}
+                closeness={settings.closeness}
+                onCloseness={(v) => update({ closeness: v })}
+                onFromLibrary={() => setPicking(true)}
+                toast={toast}
               />
-            </label>
-            <div className="row2">
               <label className="field">
-                <span className="small" title="Videos must mention at least one of these">
-                  Keywords / hashtags
-                </span>
-                <input value={settings.keywords} placeholder="#cardrift, night drift" onChange={(e) => update({ keywords: e.target.value })} />
+                <span>{refsList.length ? 'Anything to add?' : 'Or describe it'}</span>
+                <textarea
+                  rows={3}
+                  className="short"
+                  value={settings.description}
+                  onChange={(e) => update({ description: e.target.value })}
+                  placeholder={
+                    refsList.length
+                      ? 'Only night shots, no talking'
+                      : 'Cinematic slow-motion car drifts at night with smoke, no talking, filmed from low angles'
+                  }
+                />
               </label>
-              <label className="field">
-                <span className="small">Skip videos mentioning</span>
-                <input value={settings.exclude} placeholder="giveaway, tutorial" onChange={(e) => update({ exclude: e.target.value })} />
-              </label>
-            </div>
-          </section>
+              <Fold title="Keywords and exclusions" summary={wordsSummary}>
+                <label className="field">
+                  <span title="Videos must mention at least one of these">Keywords or hashtags</span>
+                  <input value={settings.keywords} placeholder="#cardrift, night drift" onChange={(e) => update({ keywords: e.target.value })} />
+                </label>
+                <label className="field">
+                  <span>Skip videos mentioning</span>
+                  <input value={settings.exclude} placeholder="giveaway, tutorial" onChange={(e) => update({ exclude: e.target.value })} />
+                </label>
+              </Fold>
+            </Step>
 
-          <section className="card stack">
-            <h2>Where to search</h2>
-            {PLATFORMS.map((p) => {
-              const on = settings.platforms.includes(p.id);
-              const loggedIn = !!status?.logins?.[p.id];
-              return (
-                <div key={p.id} className="reel-platform">
-                  <label className="check" style={{ flex: 1 }}>
-                    <input
-                      type="checkbox"
-                      checked={on}
-                      onChange={(e) =>
-                        update({
-                          platforms: e.target.checked
-                            ? [...settings.platforms, p.id]
-                            : settings.platforms.filter((x) => x !== p.id),
-                        })
-                      }
-                    />
-                    <span>{p.label}</span>
-                  </label>
-                  <button
-                    type="button"
-                    className="btn small"
-                    disabled={running || testing}
-                    title="Run one quick real search and check every step"
-                    onClick={async () => {
-                      try {
-                        const { query } = await api.selfTest(p.id, settings);
-                        setSelfTest({ platform: p.id, query, running: true, steps: [] });
-                        setShowSelfTest(true);
-                        onStatus();
-                      } catch (err) {
-                        toast((err as Error).message);
-                      }
-                    }}
-                  >
-                    Test
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn small${loggedIn ? ' connected' : ''}`}
-                    onClick={async () => {
-                      try {
-                        await api.reelsLogin(p.id);
-                        toast(`Log in to ${PLATFORM_NAMES[p.id]} in the window that opened, then come back here.`);
-                        setTimeout(onStatus, 4000);
-                      } catch (err) {
-                        toast((err as Error).message);
-                      }
-                    }}
-                  >
-                    {loggedIn ? 'Connected ✓' : 'Connect'}
-                  </button>
-                </div>
-              );
-            })}
-            <label className="check small">
-              <input type="checkbox" checked={settings.include_images} onChange={(e) => update({ include_images: e.target.checked })} />
-              <span>Pinterest: also save reference images (not just videos)</span>
-            </label>
-            {status?.canImportLogins && !anyLogin && (
-              <div className="notice info small row">
-                <span>Logged in to these in the Reel Finder app? Copy those logins over instead of logging in again.</span>
-                <button type="button" className="btn small" onClick={importLogins}>
-                  Copy logins from Reel Finder
-                </button>
+            <Step n={2} title="Where to search" done={settings.platforms.length > 0 && anyLogin}>
+              <div className="platforms">
+                {PLATFORMS.map((p) => {
+                  const on = settings.platforms.includes(p.id);
+                  const loggedIn = !!status?.logins?.[p.id];
+                  return (
+                    <div key={p.id} className="reel-platform">
+                      <label className="check">
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={(e) =>
+                            update({
+                              platforms: e.target.checked
+                                ? [...settings.platforms, p.id]
+                                : settings.platforms.filter((x) => x !== p.id),
+                            })
+                          }
+                        />
+                        <span>{p.label}</span>
+                      </label>
+                      <button
+                        type="button"
+                        className="btn small"
+                        disabled={running || testing}
+                        title="Run one quick real search and check every step"
+                        onClick={async () => {
+                          try {
+                            const { query } = await api.selfTest(p.id, settings);
+                            setSelfTest({ platform: p.id, query, running: true, steps: [] });
+                            setShowSelfTest(true);
+                            onStatus();
+                          } catch (err) {
+                            toast((err as Error).message);
+                          }
+                        }}
+                      >
+                        Test
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn small${loggedIn ? ' connected' : ''}`}
+                        onClick={async () => {
+                          try {
+                            await api.reelsLogin(p.id);
+                            toast(`Log in to ${PLATFORM_NAMES[p.id]} in the window that opened, then come back here.`);
+                            setTimeout(onStatus, 4000);
+                          } catch (err) {
+                            toast((err as Error).message);
+                          }
+                        }}
+                      >
+                        {loggedIn && <Icon name="check" size={13} />}
+                        {loggedIn ? 'Connected' : 'Connect'}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
-            )}
-          </section>
-
-          <section className="card stack">
-            <div className="row2">
-              <NumberField label="Videos to save" value={settings.target_count} min={1} max={500} onChange={(v) => update({ target_count: Math.max(1, v) })} />
-              <NumberField
-                label="Videos to look at"
-                value={settings.pool_size}
-                max={2000}
-                step={10}
-                emptyIsZero
-                placeholder={`auto (${autoPool(settings.target_count || 20)})`}
-                onChange={(v) => update({ pool_size: v })}
-              />
-              <NumberField label="Time limit (min)" value={settings.time_limit_min} min={1} max={240} onChange={(v) => update({ time_limit_min: Math.max(1, v) })} />
-              <label className="field">
-                <span className="small">AI agents: {settings.agents}</span>
-                <input type="range" min={1} max={6} step={1} value={settings.agents} onChange={(e) => update({ agents: +e.target.value })} />
-              </label>
-            </div>
-          </section>
-
-          <details className="card">
-            <summary>
-              <strong>Filters</strong>
-            </summary>
-            <div className="row2" style={{ marginTop: 10 }}>
-              <NumberField label="Min length (sec)" value={settings.min_duration} emptyIsZero placeholder="0" onChange={(v) => update({ min_duration: v })} />
-              <NumberField label="Max length (sec)" value={settings.max_duration} emptyIsZero placeholder="no limit" onChange={(v) => update({ max_duration: v })} />
-              <NumberField label="Min views" value={settings.min_views} emptyIsZero step={1000} placeholder="0" onChange={(v) => update({ min_views: v })} />
-              <NumberField label="Min likes" value={settings.min_likes} emptyIsZero step={100} placeholder="0" onChange={(v) => update({ min_likes: v })} />
-              <NumberField label="Posted within (days)" value={settings.max_age_days} emptyIsZero placeholder="any time" onChange={(v) => update({ max_age_days: v })} />
-            </div>
-          </details>
-
-          <details className="card">
-            <summary>
-              <strong>AI</strong>
-            </summary>
-            <div className="stack" style={{ marginTop: 10 }}>
-              <label className="field">
-                <span className="small">Model (runs on your Mac with Ollama)</span>
-                <div className="row" style={{ flexWrap: 'nowrap' }}>
-                  <select value={settings.model} onChange={(e) => update({ model: e.target.value })}>
-                    {modelNames.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  {ollama?.running && !chosenInstalled && (
-                    <button
-                      type="button"
-                      className="btn small"
-                      disabled={ollama.pulling || !!pullNote}
-                      onClick={async () => {
-                        try {
-                          await api.pullModel(settings.model);
-                          setPullNote(`Downloading ${settings.model}…`);
-                        } catch (err) {
-                          toast((err as Error).message);
-                        }
-                      }}
-                    >
-                      Download
-                    </button>
-                  )}
+              {settings.platforms.includes('pinterest') && (
+                <label className="check">
+                  <input type="checkbox" checked={settings.include_images} onChange={(e) => update({ include_images: e.target.checked })} />
+                  <span>On Pinterest, save reference images too</span>
+                </label>
+              )}
+              {status?.canImportLogins && !anyLogin && (
+                <div className="notice info row">
+                  <span>Signed in to these in the Reel Finder app?</span>
+                  <button type="button" className="btn small" onClick={importLogins}>
+                    Copy logins from Reel Finder
+                  </button>
                 </div>
-              </label>
-              <p className="muted small" style={{ margin: 0 }}>
-                {pullNote ??
-                  (!ollama
-                    ? ''
-                    : !ollama.running
-                      ? "Ollama isn't running. Quit and reopen Fifofarm Ultimate; it starts Ollama for you. Until then, videos are matched by keywords."
-                      : !chosenInstalled
-                        ? `Press Download to install this model (one time).${RECOMMENDED_MODELS.find((r) => r.name === settings.model) ? ` ${settings.model}: ${RECOMMENDED_MODELS.find((r) => r.name === settings.model)!.note}.` : ''}`
-                        : chosen && !chosen.vision
-                          ? "This model can't see thumbnails, so it judges captions only."
-                          : '')}
-              </p>
-              <label className="field">
-                <span className="small">Minimum AI score: {settings.min_score || 'off'}</span>
-                <input type="range" min={0} max={90} step={5} value={settings.min_score} onChange={(e) => update({ min_score: +e.target.value })} />
-                <span className="scale small muted">
-                  <span>0 = always save the number I asked for</span>
-                  <span>Only near-perfect</span>
-                </span>
-              </label>
-              <label className="check small">
-                <input type="checkbox" checked={settings.watch_check} onChange={(e) => update({ watch_check: e.target.checked })} />
-                <span>Watch-check: AI looks at frames after downloading and deletes misses</span>
-              </label>
-            </div>
-          </details>
+              )}
+            </Step>
 
-          <section className="card stack">
-            <h2>Saving</h2>
-            <p className="small" style={{ margin: 0 }}>
-              To {model.name}'s <strong>Found videos</strong>: <span className="mono">{settings.output_dir}</span>{' '}
-              <button type="button" className="btn link small" onClick={onSettings}>
-                Change
-              </button>
-            </p>
-            <label className="check small">
-              <input type="checkbox" checked={settings.subfolder_per_hunt} onChange={(e) => update({ subfolder_per_hunt: e.target.checked })} />
-              <span>New subfolder for every hunt</span>
-            </label>
-            <label className="check small">
-              <input type="checkbox" checked={settings.show_browser} onChange={(e) => update({ show_browser: e.target.checked })} />
-              <span>Show the agents scrolling (otherwise they run hidden)</span>
-            </label>
-          </section>
+            <Step n={3} title="How many" done last>
+              <div className="row2">
+                <NumberField label="Videos to save" value={settings.target_count} min={1} max={500} onChange={(v) => update({ target_count: Math.max(1, v) })} />
+              </div>
+              <Fold title="Search depth" summary={depthSummary}>
+                <div className="row2">
+                  <NumberField
+                    label="Videos to look at"
+                    value={settings.pool_size}
+                    max={2000}
+                    step={10}
+                    emptyIsZero
+                    placeholder={`auto (${autoPool(settings.target_count || 20)})`}
+                    onChange={(v) => update({ pool_size: v })}
+                  />
+                  <NumberField label="Time limit (min)" value={settings.time_limit_min} min={1} max={240} onChange={(v) => update({ time_limit_min: Math.max(1, v) })} />
+                </div>
+                <label className="field">
+                  <span>
+                    AI agents<span className="field-value">{settings.agents}</span>
+                  </span>
+                  <input type="range" min={1} max={6} step={1} value={settings.agents} onChange={(e) => update({ agents: +e.target.value })} />
+                </label>
+              </Fold>
+              <Fold title="Filters" summary={filterSummary}>
+                <div className="row2">
+                  <NumberField label="Min length (sec)" value={settings.min_duration} emptyIsZero placeholder="0" onChange={(v) => update({ min_duration: v })} />
+                  <NumberField label="Max length (sec)" value={settings.max_duration} emptyIsZero placeholder="no limit" onChange={(v) => update({ max_duration: v })} />
+                  <NumberField label="Min views" value={settings.min_views} emptyIsZero step={1000} placeholder="0" onChange={(v) => update({ min_views: v })} />
+                  <NumberField label="Min likes" value={settings.min_likes} emptyIsZero step={100} placeholder="0" onChange={(v) => update({ min_likes: v })} />
+                  <NumberField label="Posted within (days)" value={settings.max_age_days} emptyIsZero placeholder="any time" onChange={(v) => update({ max_age_days: v })} />
+                </div>
+              </Fold>
+              <Fold title="AI scoring" summary={aiSummary}>
+                <div className="field">
+                  <span>Model, runs on your Mac with Ollama</span>
+                  <div className="input-row">
+                    <select value={settings.model} aria-label="AI model" onChange={(e) => update({ model: e.target.value })}>
+                      {modelNames.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    {ollama?.running && !chosenInstalled && (
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={ollama.pulling || !!pullNote}
+                        onClick={async () => {
+                          try {
+                            await api.pullModel(settings.model);
+                            setPullNote(`Downloading ${settings.model}…`);
+                          } catch (err) {
+                            toast((err as Error).message);
+                          }
+                        }}
+                      >
+                        Download
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {(pullNote ||
+                  (ollama && (!ollama.running || !chosenInstalled || (chosen && !chosen.vision)))) && (
+                  <p className="muted small">
+                    {pullNote ??
+                      (!ollama!.running
+                        ? "Ollama isn't running. Quit and reopen Fifofarm Ultimate; it starts Ollama for you. Until then, videos are matched by keywords."
+                        : !chosenInstalled
+                          ? `Press Download to install this model (one time).${RECOMMENDED_MODELS.find((r) => r.name === settings.model) ? ` ${settings.model}: ${RECOMMENDED_MODELS.find((r) => r.name === settings.model)!.note}.` : ''}`
+                          : "This model can't see thumbnails, so it judges captions only.")}
+                  </p>
+                )}
+                <label className="field">
+                  <span>
+                    Minimum AI score<span className="field-value">{settings.min_score || 'off'}</span>
+                  </span>
+                  <input type="range" min={0} max={90} step={5} value={settings.min_score} onChange={(e) => update({ min_score: +e.target.value })} />
+                  <span className="scale">
+                    <span>Always save the number I asked for</span>
+                    <span>Only near-perfect</span>
+                  </span>
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={settings.watch_check} onChange={(e) => update({ watch_check: e.target.checked })} />
+                  <span>Watch-check: the AI looks at frames after downloading and deletes misses</span>
+                </label>
+              </Fold>
+              <Fold title="Saving" summary={saveSummary}>
+                <div className="path-row">
+                  <span className="mono">{settings.output_dir}</span>
+                  <button type="button" className="btn small" onClick={onSettings}>
+                    Change
+                  </button>
+                </div>
+                <label className="check">
+                  <input type="checkbox" checked={settings.subfolder_per_hunt} onChange={(e) => update({ subfolder_per_hunt: e.target.checked })} />
+                  <span>New subfolder for every hunt</span>
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={settings.show_browser} onChange={(e) => update({ show_browser: e.target.checked })} />
+                  <span>Show the agents scrolling</span>
+                </label>
+              </Fold>
+            </Step>
 
-          <section className="card stack">
-            <h2>Save a video from a link</h2>
-            <div className="row" style={{ flexWrap: 'nowrap' }}>
-              <input
-                type="url"
-                placeholder="https://www.tiktok.com/@…/video/…"
-                spellCheck={false}
-                value={link}
-                onChange={(e) => setLink(e.target.value)}
-                aria-label="Video link"
-              />
+            <Dock
+              info={
+                <>
+                  <span className="dock-figure">
+                    {settings.target_count} video{settings.target_count === 1 ? '' : 's'}
+                  </span>
+                  <span className="dock-note">{platformNames.length ? `from ${platformNames.join(', ')}` : 'Pick where to search'}</span>
+                </>
+              }
+            >
               <button
                 type="button"
-                className="btn small"
-                onClick={async () => {
-                  if (!link.trim()) return;
-                  setLinkNote('Saving…');
-                  try {
-                    await api.saveLink(model.id, link.trim());
-                  } catch (err) {
-                    setLinkNote((err as Error).message);
-                  }
-                }}
+                className="btn icon"
+                title="Open the folder"
+                aria-label="Open the folder"
+                onClick={() => api.openFolder(progress?.folder || settings.output_dir).catch((err) => toast(err.message))}
               >
-                Save
+                <Icon name="folder" size={17} />
               </button>
-            </div>
-            {linkNote && (
-              <p className="muted small" style={{ margin: 0 }}>
-                {linkNote}
-              </p>
-            )}
+              <CtaButton
+                type="submit"
+                icon={running ? 'check' : 'radar'}
+                label={starting ? 'Starting…' : running ? (finishing ? 'Stop now' : 'Finish now') : 'Start the hunt'}
+                win={running ? undefined : 'Find the winners'}
+                busy={starting}
+                disabled={(testing && !running) || (huntingElsewhere && !running)}
+              />
+            </Dock>
           </section>
 
-          <div className="reels-actions">
-            <button type="submit" className="btn primary big" disabled={starting || (testing && !running) || (huntingElsewhere && !running)}>
-              {starting ? 'Starting…' : running ? (finishing ? 'Stop now' : 'Finish now') : 'Start hunt'}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => api.openFolder(progress?.folder || settings.output_dir).catch((err) => toast(err.message))}
-            >
-              Open folder
-            </button>
-          </div>
+          <section className="card slim">
+            <Fold title="Save one video from a link" summary={linkNote ?? undefined}>
+              <div className="input-row">
+                <input
+                  type="url"
+                  placeholder="https://www.tiktok.com/@…/video/…"
+                  spellCheck={false}
+                  value={link}
+                  onChange={(e) => setLink(e.target.value)}
+                  aria-label="Video link"
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={async () => {
+                    if (!link.trim()) return;
+                    setLinkNote('Saving…');
+                    try {
+                      await api.saveLink(model.id, link.trim());
+                    } catch (err) {
+                      setLinkNote((err as Error).message);
+                    }
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+              {linkNote && <p className="muted small">{linkNote}</p>}
+            </Fold>
+          </section>
         </form>
 
         <div className="reels-live">
@@ -722,11 +759,6 @@ export function ReelFinderPage({
           )}
           <ProgressPanel
             progress={progress}
-            idleText={
-              readyRefs
-                ? 'Press Start hunt to find videos that look like your reference.'
-                : 'Drop a reference video or describe what you need, then press Start hunt.'
-            }
           />
           <AgentsGrid agents={agentList} />
           <Feed
@@ -735,6 +767,7 @@ export function ReelFinderPage({
             usesReference={!!progress?.matching_looks}
             onPost={onPost}
             onStudio={onStudio}
+            onLibrary={onLibrary}
             onMoreLike={async (c) => {
               try {
                 // A saved find is used straight from the folder; otherwise it's fetched from its link.
@@ -743,12 +776,11 @@ export function ReelFinderPage({
                     ? await api.addReferenceLocal(model.id, c.file)
                     : await api.addReferenceLink(model.id, c.url);
                 setReferences((prev) => (prev.has(ref.id) ? prev : new Map(prev).set(ref.id, ref)));
-                toast(running ? 'Added as a reference for your next hunt.' : 'Added as a reference — press Start hunt to find more like it.');
+                toast(running ? 'Added as a reference for your next hunt.' : 'Added as a reference. Start a hunt to find more like it.');
               } catch (err) {
                 toast((err as Error).message);
               }
             }}
-            empty={null}
           />
           <ActivityLog logs={logs} onCopyReport={copyReport} onOpenLog={() => api.openLog().catch((err) => toast(err.message))} />
         </div>

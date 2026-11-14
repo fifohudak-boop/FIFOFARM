@@ -12,6 +12,7 @@ import { api } from '../api';
 import { AccountAvatar } from '../components/AccountAvatar';
 import { ColumnChart, LineChart, Sparkline, TableView } from '../components/charts';
 import { formatCount, formatDay, formatHour, formatSigned, formatWhen, timeAgo } from '../format';
+import { Icon } from '../components/Icon';
 
 const PERIODS = [7, 30, 90] as const;
 type Sort = 'newest' | 'views' | 'likes';
@@ -192,9 +193,10 @@ function VideoRow({
         {video.previewUrl ? <img className="video-thumb" src={video.previewUrl} alt="" /> : <span className="video-thumb" />}
         <span className="video-main">
           <span className="video-caption">{video.title || video.caption || <span className="muted">(no caption)</span>}</span>
-          <span className="account-meta">
-            {video.accountName} · {video.platform}
-            {video.postedAt && ` · ${video.published ? '' : 'scheduled '}${formatWhen(video.postedAt)}`}
+          <span className="account-meta facts">
+            <span>{video.accountName}</span>
+            <span>{video.platform}</span>
+            {video.postedAt && <span>{`${video.published ? '' : 'Scheduled '}${formatWhen(video.postedAt)}`}</span>}
           </span>
           <span className="video-numbers">
             {video.status === 'ok' || video.views !== null ? numbersLine(video) : <span className="muted">{note}</span>}
@@ -240,15 +242,20 @@ function AccountCard({
         <AccountAvatar name={account.name} picture={account.picture} identifier={account.identifier} />
         <span className="video-main">
           <span className="account-name">{account.name}</span>
-          <span className="account-meta">
-            {account.platform}
-            {account.profile && ` · @${account.profile}`}
-            {showOwner && account.ownerName && ` · ${account.ownerName}`}
+          <span className="account-meta facts">
+            <span>{account.platform}</span>
+            {account.profile && <span>@{account.profile}</span>}
+            {showOwner && account.ownerName && <span>{account.ownerName}</span>}
           </span>
-          <span className="video-numbers">
-            {plural(account.videos, 'post')} · {plural(account.views, 'view')}
-            {account.videos > 0 && ` · ${formatCount(account.avgViews)} per post`}
-            {headline.map((m) => ` · ${formatCount(m.value)} ${m.label.toLowerCase()}`).join('')}
+          <span className="video-numbers facts">
+            <span>{plural(account.videos, 'post')}</span>
+            <span>{plural(account.views, 'view')}</span>
+            {account.videos > 0 && <span>{formatCount(account.avgViews)} per post</span>}
+            {headline.map((m) => (
+              <span key={m.label}>
+                {formatCount(m.value)} {m.label.toLowerCase()}
+              </span>
+            ))}
           </span>
         </span>
         <span className="video-views">
@@ -360,12 +367,16 @@ export function AnalyticsPage({ model }: { model: Model }) {
 
   return (
     <div>
-      <div className="card-head">
-        <h1>{model.name}'s analytics</h1>
-        <button className="btn small" onClick={refresh} disabled={refreshing}>
-          {refreshing ? 'Checking the networks…' : 'Refresh now'}
-        </button>
-      </div>
+      <header className="page-head">
+        <h1>Analytics</h1>
+        <div className="page-actions">
+          {data && <span className="status">Checked {timeAgo(data.lastCheckedAt)}</span>}
+          <button type="button" className="btn small" onClick={refresh} disabled={refreshing}>
+            {refreshing ? <span className="spinner" aria-hidden="true" /> : <Icon name="refresh" size={14} />}
+            {refreshing ? 'Checking…' : 'Check now'}
+          </button>
+        </div>
+      </header>
 
       <div className="filter-row">
         <div className="segmented" role="group" aria-label="Period">
@@ -375,7 +386,6 @@ export function AnalyticsPage({ model }: { model: Model }) {
             </button>
           ))}
         </div>
-        <span className="muted small">{data && `Numbers checked ${timeAgo(data.lastCheckedAt)}`}</span>
       </div>
 
       {error && (

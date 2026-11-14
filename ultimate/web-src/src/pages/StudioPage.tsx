@@ -5,6 +5,9 @@ import { api } from '../api';
 import { useLive } from '../live';
 import { LibraryPicker } from '../components/LibraryPicker';
 import { DropZone } from '../components/DropZone';
+import { CtaButton } from '../components/CtaButton';
+import { Dock, Step } from '../components/Sheet';
+import { Icon } from '../components/Icon';
 
 type Mode = 'text' | 'image' | 'reference';
 
@@ -44,7 +47,7 @@ function Picked({ model, paths, onRemove }: { model: Model; paths: string[]; onR
           <img src={api.libraryThumb(model.id, p)} alt="" />
           <span className="small">{fileName(p)}</span>
           <button type="button" className="ref-remove" aria-label={`Remove ${fileName(p)}`} onClick={() => onRemove(p)}>
-            ×
+            <Icon name="x" size={12} />
           </button>
         </span>
       ))}
@@ -60,6 +63,7 @@ export function StudioPage({
   toast,
   onPost,
   onSettings,
+  onLibrary,
   canManage = false,
 }: {
   model: Model;
@@ -67,6 +71,7 @@ export function StudioPage({
   toast: (m: string) => void;
   onPost: (path: string) => void;
   onSettings: () => void;
+  onLibrary: () => void;
   canManage?: boolean;
 }) {
   const [options, setOptions] = useState<StudioOptions | null>(null);
@@ -281,50 +286,62 @@ export function StudioPage({
   const verb = isImage ? 'image' : 'video';
   const showReference = modes.some((x) => x.id === 'reference');
 
+  const maxSeconds = options?.durations.max ?? 30;
+  const hasLength = !isImage && (options?.durations.max ?? 0) > 0;
+  const sourcesDone = mode === 'image' ? photos.length > 0 : videos.length > 0;
+  const modelName = (options?.models ?? []).find((m) => m.id === genModel)?.name ?? genModel;
+  const outputSummary = [
+    modelName,
+    (options?.ratios?.length ?? 0) > 1 ? (ratio === 'adaptive' ? 'input shape' : ratio) : null,
+    (options?.resolutions?.length ?? 0) > 1 ? resolution : null,
+    hasLength ? (autoLength ? 'auto length' : `${duration} s`) : null,
+    hasLength ? (audio ? 'with sound' : 'silent') : null,
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  const blocker = !connected
+    ? `Connect ${model.name}'s provider first`
+    : mode === 'reference' && videos.length === 0
+      ? isImage
+        ? 'Add a picture to recreate'
+        : 'Add a reference video'
+      : mode === 'image' && photos.length === 0
+        ? `Add a photo of ${model.name}`
+        : mode === 'text' && !prompt.trim()
+          ? `Describe the ${verb}`
+          : null;
+  const batch = isImage && mode === 'reference' && batchCount > 1;
+
+  let step = 0;
   return (
     <div>
-      <div className="card-head">
-        <h1>AI Studio · {model.name}</h1>
-        <span className={`chip ${connected ? 'published' : 'draft'}`}>
-          {providerName} · {connected ? 'connected' : 'not connected yet'}
-        </span>
-      </div>
-
-      {connectedProviders.length > 1 && (
-        <div className="stack" style={{ marginBottom: 12 }}>
-          <div className="segmented" role="radiogroup" aria-label="Provider">
-            {connectedProviders.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                role="radio"
-                aria-checked={provider === p.id}
-                className={provider === p.id ? 'on' : ''}
-                onClick={() => loadOptions(p.id)}
-              >
-                {p.name}
-                {p.kind === 'image' ? ' · images' : ''}
-              </button>
-            ))}
-          </div>
+      <header className="page-head">
+        <h1>AI Studio</h1>
+        <div className="page-actions">
+          {connectedProviders.length > 1 ? (
+            <div className="segmented" role="radiogroup" aria-label="Provider">
+              {connectedProviders.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={provider === p.id}
+                  className={provider === p.id ? 'on' : ''}
+                  onClick={() => loadOptions(p.id)}
+                >
+                  {p.name}
+                  {p.kind === 'image' ? ' (images)' : ''}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span className={`status ${connected ? 'ok' : 'off'}`}>
+              {providerName} {connected ? 'connected' : 'not connected'}
+            </span>
+          )}
         </div>
-      )}
-
-      {!connected && (
-        <section className="card stack studio-connect">
-          <h2>{needsWorkspace ? 'Add your workspace ID' : 'Connect a video or image provider'}</h2>
-          <p className="small muted" style={{ margin: 0 }}>
-            {needsWorkspace
-              ? `${model.name}'s Wan key is saved, but Wan is served only on your workspace's own address — add the Model Studio workspace ID in Settings → ${model.name} → AI Studio keys to finish.`
-              : `Connect ${model.name}'s keys in Settings → ${model.name} → AI Studio keys.`}
-          </p>
-          <div className="row">
-            <button className="btn primary" onClick={onSettings}>
-              {needsWorkspace ? 'Add the workspace ID' : `Set ${model.name}'s key`}
-            </button>
-          </div>
-        </section>
-      )}
+      </header>
 
       {picking && (
         <LibraryPicker
@@ -344,274 +361,318 @@ export function StudioPage({
         />
       )}
 
-      <section className="card stack">
-        <h2>Make {isImage ? 'an image' : 'a video'}</h2>
-        {modes.length > 1 && (
-          <div className="segmented" role="radiogroup" aria-label="What to make">
-            {modes.map((m) => (
-              <button key={m.id} type="button" role="radio" aria-checked={mode === m.id} className={mode === m.id ? 'on' : ''} onClick={() => choose(m.id)}>
-                {m.name}
+      <div className="workspace">
+        <section className="card sheet">
+          {!connected && (
+            <div className="callout">
+              <div>
+                <strong>{needsWorkspace ? 'Add your workspace ID' : 'Connect a video or image provider'}</strong>
+                <p className="muted small">
+                  {needsWorkspace
+                    ? `${model.name}'s Wan key is saved. Wan also needs your Model Studio workspace ID.`
+                    : `${model.name} needs a provider key before anything can be made.`}
+                </p>
+              </div>
+              <button className="btn primary" onClick={onSettings}>
+                {needsWorkspace ? 'Add the workspace ID' : `Set ${model.name}'s key`}
               </button>
-            ))}
-          </div>
-        )}
-
-        {mode === 'reference' && showReference && (
-          <div className="stack">
-            <strong className="small dz-label">
-              {isImage
-                ? `Picture${videos.length === 1 ? '' : 's'} to recreate${videos.length > 1 ? ` · ${videos.length}` : ''}`
-                : `Reference video${videos.length > 1 ? 's' : ''}`}
-            </strong>
-            <DropZone
-              model={model}
-              accept={isImage ? 'image' : 'video'}
-              multiple
-              label={isImage ? 'Drag pictures or a whole folder here' : 'Drag a reference video here'}
-              hint="or click to choose"
-              onAdd={addVideos}
-              onBrowse={() => setPicking('videos')}
-            />
-            <Picked model={model} paths={videos} onRemove={(p) => setVideos((v) => v.filter((x) => x !== p))} />
-          </div>
-        )}
-        {(mode === 'image' || mode === 'reference') && (
-          <div className="stack">
-            <strong className="small dz-label">
-              {faceSwap
-                ? `Photo of ${model.name} — the face`
-                : mode === 'reference' || (mode === 'image' && multiRef)
-                  ? `Photos of ${model.name}${photos.length > 1 ? ` · ${photos.length}` : ''} (up to ${maxPhotos})`
-                  : `Photo of ${model.name}${isImage ? ' to start from' : ' (the first frame)'}`}
-            </strong>
-            <DropZone
-              model={model}
-              accept="image"
-              multiple={mode !== 'image' || multiRef}
-              label={
-                mode === 'image' && !multiRef
-                  ? 'Drag a photo here'
-                  : `Drag ${model.name}'s photos (or a folder) here`
-              }
-              hint="or click to choose"
-              onAdd={addPhotos}
-              onBrowse={() => setPicking('photos')}
-            />
-            <Picked model={model} paths={photos} onRemove={(p) => setPhotos((v) => v.filter((x) => x !== p))} />
-          </div>
-        )}
-
-        {!faceSwap && (
-        <label className="field">
-          <span>{mode === 'text' ? `Describe the ${verb}` : 'Anything to add? (optional)'}</span>
-          <textarea
-            rows={3}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder={
-              mode === 'text'
-                ? isImage
-                  ? `e.g. ${model.name} on a city rooftop at golden hour, portrait, natural light`
-                  : `e.g. ${model.name} walking through a neon-lit street at night, slow motion, vertical`
-                : 'e.g. keep the same look, outdoor golden hour light'
-            }
-          />
-        </label>
-        )}
-
-        <div className="row2">
-          <label className="field">
-            <span className="small">{options?.provider === 'wan' ? 'Wan version' : 'Model'}</span>
-            <select value={genModel} onChange={(e) => setGenModel(e.target.value)}>
-              {(options?.models ?? []).map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {(options?.ratios?.length ?? 0) > 1 && (
-            <label className="field">
-              <span className="small">Shape</span>
-              <select value={ratio} onChange={(e) => setRatio(e.target.value)}>
-                {(options?.ratios ?? ['9:16']).map((r) => (
-                  <option key={r} value={r}>
-                    {RATIO_LABEL[r] ?? r}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {(options?.resolutions?.length ?? 0) > 1 && (
-            <label className="field">
-              <span className="small">Quality</span>
-              <select value={resolution} onChange={(e) => setResolution(e.target.value)}>
-                {(options?.resolutions ?? []).map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {!isImage && (options?.durations.max ?? 0) > 0 && (
-            <div className="field">
-              <span className="small">
-                Length: {autoLength ? (mode === 'reference' ? 'like the reference' : 'auto') : `${duration} s`}
-              </span>
-              {options?.durations.auto && (
-                <label className="check small">
-                  <input type="checkbox" checked={autoLength} onChange={(e) => setAutoLength(e.target.checked)} />
-                  <span>Auto</span>
-                </label>
-              )}
-              {!autoLength && (
-                <input
-                  type="range"
-                  min={options?.durations.min ?? 2}
-                  max={options?.durations.max ?? 30}
-                  value={duration}
-                  aria-label="Length in seconds"
-                  onChange={(e) => setDuration(+e.target.value)}
-                />
-              )}
             </div>
           )}
-        </div>
-        {!isImage && (options?.durations.max ?? 0) > 0 && (
-          <label className="check small">
-            <input type="checkbox" checked={audio} onChange={(e) => setAudio(e.target.checked)} />
-            <span>With sound (matching audio)</span>
-          </label>
-        )}
-        {connected && (
-          <div className="cost-line">
-            {price != null ? (
-              <>
-                <span className="cost-amount">{money(price)}</span>
-                <span className="muted small">
-                  {isImage
-                    ? batchCount > 1
-                      ? `for ${batchCount} pictures · ${money(price / batchCount)} each, automatic from the provider’s price`
-                      : 'per image, automatic from the provider’s price'
-                    : autoLength
-                      ? `rough, for ~${estSeconds}s — auto length lets the model choose, up to ${options?.durations.max ?? 30}s, so it can cost several × this (≈${money((price / Math.max(estSeconds, 1)) * (options?.durations.max ?? 30))} at the longest)`
-                      : `for ${duration}s at ${resolution}, automatic from the provider’s price`}
-                </span>
-              </>
-            ) : (
-              <span className="muted small">Price shown once the provider and model are set.</span>
-            )}
-          </div>
-        )}
-        {provider === 'argolink-video' && mode === 'reference' && (
-          <p className="muted small" style={{ margin: 0 }}>
-            Recreate keeps your clip’s length and bills about <strong>2×</strong> it — ArgoLink counts your clip as both
-            the input and the output. The exact cost is shown once it’s made. Wan 3.0 is the cheapest for this.
-          </p>
-        )}
-        {error && <div className="notice error small">{error}</div>}
-        <button type="button" className="btn primary big" disabled={!ready} onClick={generate}>
-          {!connected
-            ? `Connect ${model.name}'s provider first`
-            : busy
-              ? 'Sending…'
-              : mode === 'reference' && videos.length === 0
-                ? isImage
-                  ? 'Add a picture (or folder) to recreate'
-                  : 'Choose a reference video'
-                : mode === 'image' && photos.length === 0
-                  ? `Choose a photo of ${model.name}`
-                  : mode === 'text' && !prompt.trim()
-                    ? `Describe the ${verb}`
-                    : isImage && mode === 'reference' && batchCount > 1
-                      ? `Recreate ${batchCount} pictures for ${model.name}`
-                      : `Make ${isImage ? 'the image' : 'it'} for ${model.name}`}
-        </button>
-      </section>
 
-      <section className="card">
-        <h2>{model.name}'s AI {isImage ? 'images' : 'videos'}</h2>
-        {jobs === null ? (
-          <p className="muted">Loading…</p>
-        ) : jobs.length === 0 ? (
-          <p className="muted small">Nothing made yet.</p>
-        ) : (
-          <div className="stack">
-            {jobs.map((job) => (
-              <div key={job.id} className="studio-job">
-                {job.file ? (
-                  <img src={api.libraryThumb(model.id, job.file)} alt="" className="studio-thumb" />
-                ) : (
-                  <span className="studio-thumb empty" />
-                )}
-                <div className="account-main">
-                  <div className="account-name">
-                    {job.kind === 'image'
-                      ? `${
-                          job.mode === 'reference'
-                            ? (job.total ?? 1) > 1
-                              ? `Recreated ${job.done ?? job.total} of ${job.total} pictures`
-                              : 'Recreated picture'
-                            : job.mode === 'image'
-                              ? 'From a photo'
-                              : 'Image'
-                        } · ${job.ratio} · ${job.resolution}`
-                      : `${job.mode === 'text' ? 'From a prompt' : job.mode === 'image' ? 'From a photo' : 'Like a reference video'} · ${
-                          job.seconds ? `${job.seconds}s` : job.duration === -1 ? 'auto length' : `${job.duration}s`
-                        } · ${job.ratio} · ${job.resolution}`}
-                    {job.cost != null && <span className="cost-tag">{money(job.cost)}</span>}
+          {modes.length > 1 && (
+            <Step n={++step} title="Start from" done>
+              <div className="segmented wide" role="radiogroup" aria-label="What to start from">
+                {modes.map((m) => (
+                  <button key={m.id} type="button" role="radio" aria-checked={mode === m.id} className={mode === m.id ? 'on' : ''} onClick={() => choose(m.id)}>
+                    {m.name}
+                  </button>
+                ))}
+              </div>
+            </Step>
+          )}
+
+          {mode !== 'text' && (
+            <Step n={++step} title={mode === 'image' ? `Add ${multiRef ? 'photos' : 'a photo'} of ${model.name}` : isImage ? 'Add the pictures' : 'Add the reference and photos'} done={sourcesDone}>
+              <div className={`sources${mode === 'reference' && showReference ? ' two' : ''}`}>
+                {mode === 'reference' && showReference && (
+                  <div className="source">
+                    <span className="source-label">
+                      {isImage ? `Picture${videos.length === 1 ? '' : 's'} to recreate` : `Reference video${videos.length > 1 ? 's' : ''}`}
+                      {videos.length > 1 && <span className="count">{videos.length}</span>}
+                    </span>
+                    <DropZone
+                      model={model}
+                      accept={isImage ? 'image' : 'video'}
+                      multiple
+                      compact={videos.length > 0}
+                      label={isImage ? 'Drop pictures or a folder' : 'Drop a reference video'}
+                      hint="or click to choose"
+                      onAdd={addVideos}
+                      onBrowse={() => setPicking('videos')}
+                    />
+                    <Picked model={model} paths={videos} onRemove={(p) => setVideos((v) => v.filter((x) => x !== p))} />
                   </div>
-                  {job.prompt ? (
-                    <button
-                      type="button"
-                      className={`studio-prompt${openPrompts.has(job.id) ? ' open' : ''}`}
-                      onClick={() => togglePrompt(job.id)}
-                      title={openPrompts.has(job.id) ? 'Hide the prompt' : 'Show the full prompt'}
-                    >
-                      <span className="studio-prompt-text">{job.prompt}</span>
-                      <span className="studio-prompt-caret" aria-hidden="true">
-                        {openPrompts.has(job.id) ? '⌃' : '⌄'}
-                      </span>
-                    </button>
-                  ) : (
-                    <div className="account-meta">
-                      {job.videos[0] ? fileName(job.videos[0]) : job.photos[0] ? fileName(job.photos[0]) : ''}
-                    </div>
-                  )}
-                  {job.status !== 'saved' && job.status !== 'failed' && job.step && <div className="muted small">{job.step}…</div>}
-                  {job.status === 'saved' && (job.failedCount ?? 0) > 0 && (
-                    <div className="muted small">{job.failedCount} couldn’t be recreated</div>
-                  )}
-                  {job.error && <div className="batch-error">{job.error}</div>}
-                </div>
-                <div className="account-side stack">
-                  <span className={`chip ${job.status === 'saved' ? 'published' : job.status === 'failed' ? 'failed' : 'posting'}`}>
-                    {STATUS_LABEL[job.status] ?? job.status}
+                )}
+                <div className="source">
+                  <span className="source-label">
+                    {faceSwap
+                      ? `${model.name}'s face`
+                      : mode === 'reference' || multiRef
+                        ? `Photos of ${model.name}`
+                        : isImage
+                          ? `Photo of ${model.name} to start from`
+                          : `Photo of ${model.name}, the first frame`}
+                    {photos.length > 1 && <span className="count">{photos.length}</span>}
+                    {(mode === 'reference' || multiRef) && !faceSwap && <span className="source-limit">up to {maxPhotos}</span>}
                   </span>
-                  {job.file && (
-                    <div className="row">
-                      <button className="btn primary small" onClick={() => onPost(job.file!)}>
-                        Post
-                      </button>
-                      {showReference && (job.kind === 'image') === isImage && (
-                        <button className="btn small" onClick={() => reuse(job.file!)}>
-                          Edit
-                        </button>
-                      )}
-                      {canManage && (
-                        <button className="btn link small" onClick={() => api.openFolder(job.file!).catch((e) => toast(e.message))}>
-                          Show
-                        </button>
-                      )}
-                    </div>
-                  )}
+                  <DropZone
+                    model={model}
+                    accept="image"
+                    multiple={mode !== 'image' || multiRef}
+                    compact={photos.length > 0}
+                    label={mode === 'image' && !multiRef ? 'Drop a photo' : `Drop ${model.name}'s photos or a folder`}
+                    hint="or click to choose"
+                    onAdd={addPhotos}
+                    onBrowse={() => setPicking('photos')}
+                  />
+                  <Picked model={model} paths={photos} onRemove={(p) => setPhotos((v) => v.filter((x) => x !== p))} />
                 </div>
               </div>
-            ))}
+            </Step>
+          )}
+
+          {!faceSwap && (
+            <Step
+              n={++step}
+              title={mode === 'text' ? `Describe the ${verb}` : 'Direct it'}
+              done={prompt.trim().length > 0}
+              aside={mode === 'text' ? undefined : <span className="optional">Optional</span>}
+            >
+              <textarea
+                rows={3}
+                value={prompt}
+                aria-label={mode === 'text' ? `Describe the ${verb}` : 'Anything to add'}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder={
+                  mode === 'text'
+                    ? isImage
+                      ? `${model.name} on a city rooftop at golden hour, portrait, natural light`
+                      : `${model.name} walking through a neon-lit street at night, slow motion, vertical`
+                    : 'Keep the same look, outdoor golden hour light'
+                }
+              />
+            </Step>
+          )}
+
+          <Step n={++step} title="Output" done last collapsible summary={outputSummary}>
+            <div className="row2">
+              <label className="field">
+                <span>{options?.provider === 'wan' ? 'Wan version' : 'Model'}</span>
+                <select value={genModel} onChange={(e) => setGenModel(e.target.value)}>
+                  {(options?.models ?? []).map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {(options?.ratios?.length ?? 0) > 1 && (
+                <label className="field">
+                  <span>Shape</span>
+                  <select value={ratio} onChange={(e) => setRatio(e.target.value)}>
+                    {(options?.ratios ?? ['9:16']).map((r) => (
+                      <option key={r} value={r}>
+                        {RATIO_LABEL[r] ?? r}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {(options?.resolutions?.length ?? 0) > 1 && (
+                <label className="field">
+                  <span>Quality</span>
+                  <select value={resolution} onChange={(e) => setResolution(e.target.value)}>
+                    {(options?.resolutions ?? []).map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {hasLength && (
+                <div className="field">
+                  <span>
+                    Length
+                    <span className="field-value">{autoLength ? (mode === 'reference' ? 'like the reference' : 'auto') : `${duration} s`}</span>
+                  </span>
+                  <div className="length-row">
+                    {options?.durations.auto && (
+                      <label className="check">
+                        <input type="checkbox" checked={autoLength} onChange={(e) => setAutoLength(e.target.checked)} />
+                        <span>Auto</span>
+                      </label>
+                    )}
+                    {!autoLength && (
+                      <input
+                        type="range"
+                        min={options?.durations.min ?? 2}
+                        max={maxSeconds}
+                        value={duration}
+                        aria-label="Length in seconds"
+                        onChange={(e) => setDuration(+e.target.value)}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            {hasLength && (
+              <label className="check">
+                <input type="checkbox" checked={audio} onChange={(e) => setAudio(e.target.checked)} />
+                <span>With sound</span>
+              </label>
+            )}
+          </Step>
+
+          {error && <div className="notice error">{error}</div>}
+
+          <Dock
+            info={
+              connected &&
+              (price != null ? (
+                <>
+                  <span className="dock-figure">{money(price)}</span>
+                  <span className="dock-note">
+                    {isImage
+                      ? batchCount > 1
+                        ? `${batchCount} pictures, ${money(price / batchCount)} each`
+                        : 'per image'
+                      : autoLength
+                        ? `about ${estSeconds} s, up to ${money((price / Math.max(estSeconds, 1)) * maxSeconds)} if it runs ${maxSeconds} s`
+                        : `${duration} s at ${resolution}`}
+                    {provider === 'argolink-video' && mode === 'reference' && <span className="dock-warn">Recreating bills about 2× your clip's length</span>}
+                  </span>
+                </>
+              ) : (
+                <span className="dock-note">The price shows once a model is set</span>
+              ))
+            }
+          >
+            <CtaButton
+              icon="sparkles"
+              label={busy ? 'Sending…' : blocker ?? (batch ? `Recreate ${batchCount} pictures` : `Make the ${verb}`)}
+              win={batch ? `${batchCount} new looks, coming up` : `Bring ${model.name} to life`}
+              busy={busy}
+              disabled={!ready}
+              onClick={generate}
+            />
+          </Dock>
+        </section>
+
+        <section className="card results">
+          <div className="card-head">
+            <h2>
+              {model.name}'s {isImage ? 'images' : 'videos'}
+            </h2>
+            <button type="button" className="btn small" onClick={onLibrary}>
+              <Icon name="folder" size={14} />
+              Library
+            </button>
           </div>
-        )}
-      </section>
+          {jobs === null ? (
+            <p className="muted">Loading…</p>
+          ) : jobs.length === 0 ? (
+            <div className="empty">Nothing made yet. What you make lands here.</div>
+          ) : (
+            <div className="jobs">
+              {jobs.map((job) => {
+                const working = job.status !== 'saved' && job.status !== 'failed';
+                const title =
+                  job.kind === 'image'
+                    ? job.mode === 'reference'
+                      ? (job.total ?? 1) > 1
+                        ? `Recreated ${job.done ?? job.total} of ${job.total} pictures`
+                        : 'Recreated picture'
+                      : job.mode === 'image'
+                        ? 'From a photo'
+                        : 'Image'
+                    : job.mode === 'text'
+                      ? 'From a prompt'
+                      : job.mode === 'image'
+                        ? 'From a photo'
+                        : 'Like a reference';
+                const facts = [
+                  job.kind === 'image' ? null : job.seconds ? `${job.seconds} s` : job.duration === -1 ? 'auto length' : `${job.duration} s`,
+                  job.ratio,
+                  job.resolution,
+                ].filter(Boolean);
+                return (
+                  <div key={job.id} className="job">
+                    {job.file ? (
+                      <img src={api.libraryThumb(model.id, job.file)} alt="" className="studio-thumb" />
+                    ) : (
+                      <span className={`studio-thumb empty${working ? ' working' : ''}`} />
+                    )}
+                    <div className="job-main">
+                      <div className="job-head">
+                        <span className="job-title">{title}</span>
+                        <span className={`chip ${job.status === 'saved' ? 'published' : job.status === 'failed' ? 'failed' : 'posting'}`}>
+                          {working && <span className="spinner" aria-hidden="true" />}
+                          {STATUS_LABEL[job.status] ?? job.status}
+                        </span>
+                      </div>
+                      <div className="facts">
+                        {facts.map((f) => (
+                          <span key={f}>{f}</span>
+                        ))}
+                        {job.cost != null && <span className="fact-cost">{money(job.cost)}</span>}
+                      </div>
+                      {job.prompt ? (
+                        <button
+                          type="button"
+                          className={`studio-prompt${openPrompts.has(job.id) ? ' open' : ''}`}
+                          onClick={() => togglePrompt(job.id)}
+                          title={openPrompts.has(job.id) ? 'Hide the prompt' : 'Show the full prompt'}
+                        >
+                          <span className="studio-prompt-text">{job.prompt}</span>
+                          <Icon name="chevron" size={12} className={`twist${openPrompts.has(job.id) ? ' open' : ''}`} />
+                        </button>
+                      ) : (
+                        <div className="job-source">
+                          {job.videos[0] ? fileName(job.videos[0]) : job.photos[0] ? fileName(job.photos[0]) : ''}
+                        </div>
+                      )}
+                      {working && job.step && <div className="muted small">{job.step}…</div>}
+                      {job.status === 'saved' && (job.failedCount ?? 0) > 0 && (
+                        <div className="muted small">{job.failedCount} couldn’t be recreated</div>
+                      )}
+                      {job.error && <div className="batch-error">{job.error}</div>}
+                      {job.file && (
+                        <div className="job-actions">
+                          <button className="btn primary small" onClick={() => onPost(job.file!)}>
+                            Post
+                          </button>
+                          {showReference && (job.kind === 'image') === isImage && (
+                            <button className="btn small" onClick={() => reuse(job.file!)}>
+                              Edit
+                            </button>
+                          )}
+                          {canManage && (
+                            <button className="btn small" onClick={() => api.openFolder(job.file!).catch((e) => toast(e.message))}>
+                              Show
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

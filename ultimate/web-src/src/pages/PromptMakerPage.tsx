@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import type { LibraryItem, Model, PromptResult } from '../types';
 import { api } from '../api';
+import { CtaButton } from '../components/CtaButton';
+import { Icon } from '../components/Icon';
 import { LibraryPicker } from '../components/LibraryPicker';
+import { Dock, Fold, Step } from '../components/Sheet';
 
 // Prompt Making: pick one of this model's reference/found videos and turn it into a ready-to-generate
 // text-to-video prompt (via the same local vision model Reel Finder uses). Paste it into AI Studio's
@@ -61,9 +64,10 @@ export function PromptMakerPage({
   }
 
   const p = result?.prompt;
+  const parts = p ? FIELDS.filter((f) => p[f.key]) : [];
 
   return (
-    <div className="page stack">
+    <div>
       {picking && (
         <LibraryPicker
           model={model}
@@ -80,79 +84,138 @@ export function PromptMakerPage({
         />
       )}
 
-      <section className="card stack">
-        <h2>Prompt making</h2>
+      <header className="page-head">
+        <h1>Prompt Making</h1>
+      </header>
 
-        <div className="row" style={{ alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <button className="btn" onClick={() => setPicking(true)} disabled={busy}>
-            {video ? 'Choose a different video' : 'Choose a reference video'}
-          </button>
-          {video && (
-            <div className="row" style={{ alignItems: 'center', gap: 8 }}>
-              <img src={api.libraryThumb(model.id, video.path)} alt="" className="studio-thumb" />
-              <span className="small">{video.name}</span>
+      <section className="card sheet">
+        <Step
+          n={1}
+          title="Pick a video"
+          done={!!video}
+          aside={
+            video ? (
+              <button type="button" className="btn link small" onClick={() => setPicking(true)} disabled={busy}>
+                Change
+              </button>
+            ) : undefined
+          }
+        >
+          {video ? (
+            <div className="media-ready">
+              <img src={api.libraryThumb(model.id, video.path)} alt="" />
+              <div className="media-ready-main">
+                <strong>{video.name}</strong>
+                {video.folder && <span className="muted small">{video.folder}</span>}
+              </div>
+            </div>
+          ) : (
+            <button type="button" className="drop pick" onClick={() => setPicking(true)}>
+              <span className="dropzone-icon">
+                <Icon name="folder" size={18} />
+              </span>
+              <strong>Choose a video</strong>
+              <span className="dropzone-hint">from {model.name}'s folders</span>
+            </button>
+          )}
+        </Step>
+
+        <Step
+          n={2}
+          title="The prompt"
+          done={!!p}
+          last
+          aside={
+            p ? (
+              <span className="facts">
+                <span>{result?.model || 'local model'}</span>
+                {result?.seconds ? <span>{result.seconds}s clip</span> : null}
+              </span>
+            ) : undefined
+          }
+        >
+          {busy && (
+            <div className="working row">
+              <span className="spinner" aria-hidden="true" />
+              <span>Reading the video…</span>
             </div>
           )}
-        </div>
-
-        <div className="row">
-          <button className="btn primary" onClick={make} disabled={!video || busy}>
-            {busy ? 'Reading the video and writing the prompt…' : 'Make the prompt'}
-          </button>
-        </div>
-        {error && <div className="notice error">{error}</div>}
-      </section>
-
-      {p && (
-        <section className="card stack">
-          <div className="card-head" style={{ marginBottom: 0 }}>
-            <h2>The prompt</h2>
-            <span className="muted small">
-              {result?.model || 'local model'}
-              {result?.seconds ? ` · ${result.seconds}s clip` : ''}
-            </span>
-          </div>
-          {result?.warning && <div className="notice">{result.warning}</div>}
-
-          <strong className="small">Paste this into AI Studio (Wan)</strong>
-          <textarea className="prompt-out" readOnly rows={6} value={p.prompt} />
-          <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
-            <button className="btn primary" onClick={() => onUseInStudio(p.prompt)}>
-              Use in AI Studio
-            </button>
-            <button className="btn" onClick={() => copy(p.prompt, 'Prompt')}>
-              Copy prompt
-            </button>
-            <button className="btn link" onClick={() => copy(JSON.stringify(p, null, 2), 'JSON')}>
-              Copy all as JSON
-            </button>
-          </div>
-
-          {p.negative && (
+          {error && <div className="notice error">{error}</div>}
+          {p && (
             <>
-              <strong className="small">Negative (things to avoid)</strong>
-              <div className="row" style={{ alignItems: 'flex-start', gap: 8 }}>
-                <textarea className="prompt-out" readOnly rows={2} value={p.negative} style={{ flex: 1 }} />
-                <button className="btn small" onClick={() => copy(p.negative, 'Negative')}>
+              {result?.warning && <div className="notice warn">{result.warning}</div>}
+              <textarea className="prompt-out" readOnly rows={7} value={p.prompt} aria-label="Prompt" />
+              <div className="row">
+                <button type="button" className="btn small" onClick={() => copy(p.prompt, 'Prompt')}>
+                  <Icon name="copy" size={15} />
                   Copy
                 </button>
               </div>
+              {p.negative && (
+                <Fold title="Things to avoid" summary={p.negative}>
+                  <textarea className="prompt-out short" readOnly rows={2} value={p.negative} aria-label="Things to avoid" />
+                  <div className="row">
+                    <button type="button" className="btn small" onClick={() => copy(p.negative, 'Negative')}>
+                      <Icon name="copy" size={15} />
+                      Copy
+                    </button>
+                  </div>
+                </Fold>
+              )}
+              <Fold title="Breakdown" summary={`${parts.length} parts`}>
+                <dl className="prompt-grid">
+                  {parts.map((f) => (
+                    <div key={f.key} className="prompt-row">
+                      <dt className="muted small">{f.label}</dt>
+                      <dd className="small">{p[f.key]}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <div className="row">
+                  <button type="button" className="btn small" onClick={() => copy(JSON.stringify(p, null, 2), 'JSON')}>
+                    <Icon name="copy" size={15} />
+                    Copy all as JSON
+                  </button>
+                </div>
+              </Fold>
             </>
           )}
+        </Step>
 
-          <details className="stack">
-            <summary className="small">The breakdown (tweak before you generate)</summary>
-            <dl className="prompt-grid">
-              {FIELDS.filter((f) => p[f.key]).map((f) => (
-                <div key={f.key} className="prompt-row">
-                  <dt className="muted small">{f.label}</dt>
-                  <dd className="small">{p[f.key]}</dd>
-                </div>
-              ))}
-            </dl>
-          </details>
-        </section>
-      )}
+        <Dock
+          info={
+            p ? (
+              <>
+                <span className="dock-figure">Prompt ready</span>
+                <span className="dock-note">Next: AI Studio</span>
+              </>
+            ) : (
+              <>
+                <span className="dock-figure">Free</span>
+                <span className="dock-note">Runs on your local AI model</span>
+              </>
+            )
+          }
+        >
+          {p ? (
+            <>
+              <button type="button" className="btn" onClick={make}>
+                Write it again
+              </button>
+              <CtaButton icon="sparkles" label="Use in AI Studio" win={`Make it ${model.name}'s`} onClick={() => onUseInStudio(p.prompt)} />
+            </>
+          ) : (
+            <CtaButton
+              icon="wand"
+              label={busy ? 'Reading the video…' : video ? 'Write the prompt' : 'Pick a video first'}
+              win="Crack the formula"
+              busy={busy}
+              disabled={!video}
+              onClick={make}
+            />
+          )}
+        </Dock>
+      </section>
     </div>
   );
 }

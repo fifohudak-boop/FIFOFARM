@@ -3,9 +3,10 @@ import type { AppStatus, Me, Model, ReelsStatus } from './types';
 import { api, ApiError } from './api';
 import { BRAND } from './brand';
 import { connectLive, useLive } from './live';
-import { SYSTEMS, ALL_TABS } from './systems';
-import { ModelSwitcher } from './components/ModelSwitcher';
-import { SystemNav } from './components/SystemNav';
+import { ALL_TABS, navItemOf } from './systems';
+import { ModelAvatar, ModelSwitcher } from './components/ModelSwitcher';
+import { Sidebar } from './components/Sidebar';
+import { Icon } from './components/Icon';
 import { EngineSetup } from './components/EngineSetup';
 import { ComposePage } from './pages/ComposePage';
 import { AccountsPage } from './pages/AccountsPage';
@@ -38,7 +39,7 @@ export type Tab =
   | 'settings';
 
 const FIFOFARM_TABS: Tab[] = ['post', 'accounts', 'history', 'analytics'];
-const WIDE_TABS: Tab[] = ['reels', 'reels-library', 'prompt', 'studio-library', 'edit'];
+const WIDE_TABS: Tab[] = ['reels', 'reels-library', 'studio', 'studio-library', 'edit'];
 const MODEL_KEY = 'ultimate.model';
 
 function tabFromHash(): Tab {
@@ -74,6 +75,8 @@ export function App() {
   const [reels, setReels] = useState<ReelsStatus | null>(null);
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [navOpen, setNavOpen] = useState(false); // the sidebar as a drawer, on a phone
+  const closeNav = useCallback(() => setNavOpen(false), []);
 
   const toast = useCallback((message: string) => {
     setToastMessage(message);
@@ -276,39 +279,52 @@ export function App() {
   const needsEngine = FIFOFARM_TABS.includes(tab) && !engineOk;
   const huntingModel = reels?.hunting ? reels.huntModel : null;
   const huntingName = huntingModel ? models.find((x) => x.id === huntingModel)?.name : null;
-  const visibleSystems = canManage ? SYSTEMS : SYSTEMS.filter((s) => s.id !== 'settings');
 
   return (
     <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="brand">
-            <img className="brand-logo" src="/icon.svg" alt="" />
-            <span className="brand-name">{brand}</span>
-            <span
-              className={`brand-dot${engineOk ? '' : ' down'}`}
-              title={engineOk ? 'Posting engine connected' : 'Posting engine not connected'}
-            />
-          </div>
+      <Sidebar
+        brand={brand}
+        current={tab}
+        canManage={canManage}
+        engineOk={engineOk}
+        huntingName={huntingModel ? huntingName ?? null : null}
+        open={navOpen}
+        onClose={closeNav}
+        onNavigate={go}
+        switcher={
           <ModelSwitcher
             models={models}
             current={model}
             onSelect={selectModel}
             onCreate={createModel}
-            onManage={() => go('settings')}
+            onManage={() => {
+              closeNav();
+              go('settings');
+            }}
             hunting={huntingModel}
             canManage={canManage}
           />
-          <SystemNav systems={visibleSystems} current={tab} huntingName={huntingModel ? huntingName ?? null : null} onNavigate={go} />
-          {me && !me.local && (
-            <div className="topbar-account">
-              <span className="muted small">{me.user.name || me.user.username}</span>
+        }
+        account={
+          me && !me.local ? (
+            <div className="side-account">
+              <span className="side-text">{me.user.name || me.user.username}</span>
               <button type="button" className="btn link small" onClick={logout}>
                 Log out
               </button>
             </div>
-          )}
-        </div>
+          ) : undefined
+        }
+      />
+      <div className="content">
+      <header className="mobilebar">
+        <button type="button" className="btn icon" aria-label="Open the menu" onClick={() => setNavOpen(true)}>
+          <Icon name="menu" size={18} />
+        </button>
+        <span className="mobilebar-title">{navItemOf(tab)?.label ?? brand}</span>
+        <button type="button" className="mobilebar-model" aria-label={`Model: ${model.name}. Open the menu`} onClick={() => setNavOpen(true)}>
+          <ModelAvatar model={model} size={28} />
+        </button>
       </header>
       <main className={WIDE_TABS.includes(tab) ? 'wide' : ''}>
         {status.updateAvailable && (
@@ -332,7 +348,12 @@ export function App() {
           </div>
         )}
         {needsEngine ? (
-          <EngineSetup status={status} onDone={loadStatus} toast={toast} />
+          <>
+            <header className="page-head">
+              <h1>{navItemOf(tab)?.label ?? 'Post'}</h1>
+            </header>
+            <EngineSetup status={status} onDone={loadStatus} toast={toast} />
+          </>
         ) : (
           <>
             {tab === 'post' && (
@@ -359,6 +380,7 @@ export function App() {
             onPost={(path) => handOff('post', path)}
             onStudio={(path) => handOff('studio-video', path)}
             onSettings={() => go('settings')}
+            onLibrary={() => go('reels-library')}
           />
         )}
         {tab === 'prompt' && (
@@ -377,6 +399,7 @@ export function App() {
             toast={toast}
             onPost={(path) => handOff('post', path)}
             onSettings={() => go('settings')}
+            onLibrary={() => go('studio-library')}
             canManage={canManage}
           />
         )}
@@ -422,6 +445,7 @@ export function App() {
           />
         )}
       </main>
+      </div>
       {toastMessage && (
         <div className="toast" role="status">
           {toastMessage}

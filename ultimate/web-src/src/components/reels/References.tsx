@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { Model, Reference } from '../../types';
 import { api, uploadReference } from '../../api';
 import { closenessLabel } from './common';
+import { Icon } from '../Icon';
 
 const MAX_REFERENCES = 5;
 
@@ -32,7 +33,7 @@ function ReferenceCard({ model, r, onRemove }: { model: Model; r: Reference; onR
       </div>
       {!r.uploading && (
         <button type="button" className="ref-remove" aria-label={`Remove ${r.name}`} onClick={onRemove}>
-          ×
+          <Icon name="x" size={12} />
         </button>
       )}
     </div>
@@ -107,17 +108,10 @@ export function ReferencesPanel({
   }
 
   return (
-    <section className="card stack">
-      <div className="card-head" style={{ marginBottom: 0 }}>
-        <h2>Reference videos</h2>
-      </div>
+    <div className="refs-panel">
       {!full && (
         <div
-          className={`drop${over ? ' over' : ''}${refs.length ? ' compact' : ''}`}
-          role="button"
-          tabIndex={0}
-          onClick={() => fileInput.current?.click()}
-          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileInput.current?.click()}
+          className={`dropzone${over ? ' over' : ''}${refs.length ? ' compact' : ''}`}
           onDragOver={(e) => {
             e.preventDefault();
             setOver(true);
@@ -134,7 +128,18 @@ export function ReferencesPanel({
             }
           }}
         >
-          <strong>Drop a video here, or click to choose</strong>
+          <button type="button" className="dropzone-main" onClick={() => fileInput.current?.click()}>
+            <span className="dropzone-icon" aria-hidden="true">
+              <Icon name={refs.length ? 'plus' : 'upload'} size={refs.length ? 14 : 18} />
+            </span>
+            <span className="dropzone-label">{refs.length ? 'Add another' : 'Drop a reference video'}</span>
+            {refs.length === 0 && <span className="dropzone-hint">or click to choose</span>}
+          </button>
+          <div className="dropzone-actions">
+            <button type="button" className="btn small" onClick={onFromLibrary}>
+              From {model.name}'s folders
+            </button>
+          </div>
         </div>
       )}
       <input
@@ -148,10 +153,10 @@ export function ReferencesPanel({
           e.target.value = '';
         }}
       />
-      <div className="row" style={{ flexWrap: 'nowrap' }}>
+      <div className="input-row">
         <input
           type="url"
-          placeholder="…or paste a video link"
+          placeholder="Or paste a video link"
           value={link}
           spellCheck={false}
           onChange={(e) => setLink(e.target.value)}
@@ -163,13 +168,8 @@ export function ReferencesPanel({
           }}
           aria-label="Link to a reference video"
         />
-        <button type="button" className="btn small" onClick={() => addLink(link)}>
+        <button type="button" className="btn" onClick={() => addLink(link)} disabled={full}>
           Add
-        </button>
-      </div>
-      <div className="row">
-        <button type="button" className="btn small" onClick={onFromLibrary} disabled={full}>
-          From {model.name}'s folders…
         </button>
       </div>
       {refs.length > 0 && (
@@ -198,15 +198,15 @@ export function ReferencesPanel({
       {refs.length > 0 && (
         <label className="field">
           <span>
-            How close to the reference: <span className="muted">{closenessLabel(closeness)}</span>
+            How close to the reference<span className="field-value">{closenessLabel(closeness)}</span>
           </span>
           <input type="range" min={0} max={100} step={5} value={closeness} onChange={(e) => onCloseness(+e.target.value)} />
-          <span className="scale small muted">
+          <span className="scale">
             <span>Same kind of video</span>
             <span>Nearly identical</span>
           </span>
         </label>
       )}
-    </section>
+    </div>
   );
 }

@@ -5,6 +5,8 @@ import { AccountAvatar, PlatformBadge } from '../components/AccountAvatar';
 import { CopyField } from '../components/CopyField';
 import { ModelAvatar } from '../components/ModelSwitcher';
 import { copyText } from '../clipboard';
+import { Icon } from '../components/Icon';
+import { Fold } from '../components/Sheet';
 
 // After signing in, these networks ask you to pick a page/channel inside the
 // sign-in window, so we must not close it automatically.
@@ -126,7 +128,6 @@ export function AccountsPage({ model, models, toast }: { model: Model; models: M
   const [showBluesky, setShowBluesky] = useState(false);
   const [igHelp, setIgHelp] = useState(false);
   const [shareLink, setShareLink] = useState<{ platform: string; url: string } | null>(null);
-  const [showOthers, setShowOthers] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
@@ -152,7 +153,6 @@ export function AccountsPage({ model, models, toast }: { model: Model; models: M
   const others = (all ?? [])
     .filter((a) => a.modelId !== model.id)
     .sort((a, b) => Number(Boolean(a.modelId)) - Number(Boolean(b.modelId)));
-  const unassigned = others.filter((a) => !a.modelId);
 
   // Wait for the new account to show up (it becomes this model's automatically).
   function watchForNew(before: Set<string>, popup: Window | null, identifier: string, limitMs: number) {
@@ -226,14 +226,20 @@ export function AccountsPage({ model, models, toast }: { model: Model; models: M
 
   return (
     <div>
+      <header className="page-head">
+        <h1>Accounts</h1>
+        <div className="page-actions">
+          <button type="button" className="btn small icon" onClick={refresh} aria-label="Refresh" title="Refresh">
+            <Icon name="refresh" size={14} />
+          </button>
+        </div>
+      </header>
       <section className="card">
         <div className="card-head">
           <h2 className="row" style={{ gap: 8 }}>
-            <ModelAvatar model={model} size={24} /> {model.name}'s accounts
+            <ModelAvatar model={model} size={22} /> Connected
+            {mine.length > 0 && <span className="count">{mine.length}</span>}
           </h2>
-          <button className="btn small" onClick={refresh}>
-            Refresh
-          </button>
         </div>
         {error && (
           <div className="notice error" style={{ marginBottom: 10 }}>
@@ -255,15 +261,7 @@ export function AccountsPage({ model, models, toast }: { model: Model; models: M
         {all === null ? (
           <p className="muted">Loading…</p>
         ) : mine.length === 0 ? (
-          <p className="muted">
-            {model.name} has no accounts yet. Connect one below
-            {others.length > 0
-              ? `, or add one that's already in your posting engine (${others.length} below${
-                  unassigned.length > 0 && unassigned.length < others.length ? `, ${unassigned.length} not in a model yet` : ''
-                })`
-              : ''}
-            .
-          </p>
+          <div className="empty">No accounts yet</div>
         ) : (
           <div className="stack">
             {[...groups.entries()].map(([identifier, list]) => {
@@ -281,7 +279,12 @@ export function AccountsPage({ model, models, toast }: { model: Model; models: M
                     {canAdd && (
                       <>
                         <button className="btn small primary" disabled={connecting !== null} onClick={() => connect(platform, true)}>
-                          {connecting === identifier ? 'Waiting…' : '+ Add another'}
+                          {connecting === identifier ? 'Waiting…' : (
+                            <>
+                              <Icon name="plus" size={14} />
+                              Add another
+                            </>
+                          )}
                         </button>
                         <button className="btn small" onClick={() => sendLink(platform)}>
                           Send link
@@ -301,11 +304,10 @@ export function AccountsPage({ model, models, toast }: { model: Model; models: M
                         <AccountAvatar name={a.name} picture={a.picture} identifier={a.identifier} />
                         <div className="account-main">
                           <div className="account-name">{a.name}</div>
-                          <div className="account-meta">
-                            {a.platform}
-                            {a.profile && ` · @${a.profile}`}
-                            {a.disabled && ' · disabled'}
-                            {!a.supported && ' · post to this one from Postiz'}
+                          <div className="account-meta facts">
+                            {a.profile && <span>@{a.profile}</span>}
+                            {a.disabled && <span>Disabled</span>}
+                            {!a.supported && <span>Post to this one from Postiz</span>}
                           </div>
                           {a.identifier === 'pinterest' && prefs && (
                             <PinterestBoardPicker account={a} prefs={prefs} onSaved={setPrefs} />
@@ -323,10 +325,7 @@ export function AccountsPage({ model, models, toast }: { model: Model; models: M
       </section>
 
       <section className="card">
-        <h2>Add an account for {model.name}</h2>
-        <p className="muted small">
-          A network needs its one-time setup in Fifofarm first (Fifofarm → Accounts → Set up).
-        </p>
+        <h2>Add an account</h2>
         {connecting && (
           <div className="notice info" style={{ marginBottom: 10 }}>
             Waiting for you to finish in the sign-in window… (close it to cancel)
@@ -364,7 +363,7 @@ export function AccountsPage({ model, models, toast }: { model: Model; models: M
                 ) : (
                   <div className="row">
                     <button className="btn small primary" disabled={connecting !== null} onClick={() => connect(p, count > 0)}>
-                      {connecting === p.identifier ? 'Connecting…' : count > 0 ? '+ Add another' : 'Connect'}
+                      {connecting === p.identifier ? 'Connecting…' : count > 0 ? 'Add another' : 'Connect'}
                     </button>
                     <button className="btn small" onClick={() => sendLink(p)}>
                       Send link
@@ -383,15 +382,9 @@ export function AccountsPage({ model, models, toast }: { model: Model; models: M
         </div>
       </section>
 
-      <section className="card">
-        <div className="card-head">
-          <h2>Other accounts in your posting engine</h2>
-          <button className="btn link small" onClick={() => setShowOthers((v) => !v)}>
-            {showOthers ? 'Hide' : `Show ${others.length}`}
-          </button>
-        </div>
-        {showOthers &&
-          (others.length === 0 ? (
+      <section className="card slim">
+        <Fold title="Other accounts in your posting engine" summary={others.length ? `${others.length}` : 'None'}>
+          {others.length === 0 ? (
             <p className="muted small">No other accounts.</p>
           ) : (
             <div className="account-list">
@@ -400,10 +393,10 @@ export function AccountsPage({ model, models, toast }: { model: Model; models: M
                   <AccountAvatar name={a.name} picture={a.picture} identifier={a.identifier} />
                   <div className="account-main">
                     <div className="account-name">{a.name}</div>
-                    <div className="account-meta">
-                      {a.platform}
-                      {a.profile && ` · @${a.profile}`}
-                      {a.modelName ? ` · ${a.modelName}'s` : ' · not in a model yet'}
+                    <div className="account-meta facts">
+                      <span>{a.platform}</span>
+                      {a.profile && <span>@{a.profile}</span>}
+                      <span>{a.modelName ? `${a.modelName}'s` : 'Not in a model yet'}</span>
                     </div>
                   </div>
                   <button className="btn small" onClick={() => move(a, model.id)}>
@@ -412,7 +405,8 @@ export function AccountsPage({ model, models, toast }: { model: Model; models: M
                 </div>
               ))}
             </div>
-          ))}
+          )}
+        </Fold>
       </section>
     </div>
   );
