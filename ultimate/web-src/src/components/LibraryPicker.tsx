@@ -13,6 +13,7 @@ export function LibraryPicker({
   imagesOnly = false,
   videosOnly = false,
   onPick,
+  onPickMany,
   onClose,
   onGoLibrary,
 }: {
@@ -22,10 +23,13 @@ export function LibraryPicker({
   imagesOnly?: boolean;
   videosOnly?: boolean;
   onPick: (item: LibraryItem) => void;
+  // When given, you can tick several files (in order) and add them all at once.
+  onPickMany?: (items: LibraryItem[]) => void;
   onClose: () => void;
   onGoLibrary?: () => void;
 }) {
   const [library, setLibrary] = useState<Library | null>(null);
+  const [chosen, setChosen] = useState<LibraryItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [kind, setKind] = useState<FolderKind>(kinds[0]);
 
@@ -75,8 +79,29 @@ export function LibraryPicker({
           <div className="empty">Nothing here yet</div>
         )}
         <div className="modal-scroll">
-          <LibraryGrid model={model} items={items} onPick={onPick} />
+          <LibraryGrid
+            model={model}
+            items={items}
+            selected={onPickMany ? chosen.map((c) => c.path) : undefined}
+            onPick={
+              onPickMany
+                ? (item) =>
+                    setChosen((prev) => (prev.some((c) => c.path === item.path) ? prev.filter((c) => c.path !== item.path) : [...prev, item]))
+                : onPick
+            }
+          />
         </div>
+        {onPickMany && chosen.length > 0 && (
+          <div className="picker-bar">
+            <span className="picker-count">{chosen.length === 1 ? '1 selected' : `${chosen.length} selected, in this order`}</span>
+            <button type="button" className="btn small" onClick={() => setChosen([])}>
+              Clear
+            </button>
+            <button type="button" className="btn primary small picker-add" onClick={() => onPickMany(chosen)}>
+              Add {chosen.length === 1 ? 'it' : `all ${chosen.length}`}
+            </button>
+          </div>
+        )}
         {onGoLibrary && (
           <div className="row">
             <button

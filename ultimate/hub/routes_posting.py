@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from . import accounts as account_store
 from . import analytics, batches, media, personas, postiz, settings
 from .platforms import (
-    build_post_request, count_length, is_supported, platform_catalog, platform_name, preflight,
+    build_post_request, combine, count_length, is_supported, platform_catalog, platform_name, preflight,
 )
 from .settings import DEFAULT_PREFERENCES, PREFERENCE_RULES
 
@@ -265,16 +265,35 @@ def _captions(value: Any) -> dict[str, str]:
     return {k: v for k, v in value.items() if isinstance(v, str)}
 
 
+MAX_CAROUSEL = 35  # the most any network takes in one post (TikTok photos)
+
+
+def _media_ids(media_id: str | None, media_ids: list[str]) -> list[str]:
+    ids = [i for i in media_ids if i] or ([media_id] if media_id else [])
+    if len(ids) > MAX_CAROUSEL:
+        raise HTTPException(400, f"A carousel can hold up to {MAX_CAROUSEL} photos or videos.")
+    return ids
+
+
+def _combined_media(ids: list[str], *, strict: bool) -> dict | None:
+    """One upload as it is; several become one carousel, in the order you put them."""
+    results = [media.get_result(i) for i in ids]
+    if strict and not all(results):
+        raise HTTPException(400, "An upload expired or is still processing — add the file again.")
+    return combine([r for r in results if r])
+
+
 class PreviewBody(BaseModel):
     caption: str = ""
     captions: dict[str, str] = {}
     mediaId: str | None = None
+    mediaIds: list[str] = []
 
 
 @router.post("/api/m/{model_id}/preview")
 async def preview(model_id: str, body: PreviewBody) -> dict:
     _model(model_id)
-    result = media.get_result(body.mediaId) if body.mediaId else None
+    result = _combined_media(_media_ids(body.mediaId, body.mediaIds), strict=False)
     prefs = settings.get()["preferences"]
     out = {}
     for account in await model_accounts(model_id):
@@ -332,6 +351,7 @@ class PostBody(BaseModel):
     title: str = ""
     captions: dict[str, str] = {}
     mediaId: str | None = None
+    mediaIds: list[str] = []
     scheduleAt: str | None = None
 
 
@@ -348,13 +368,9 @@ async def post(model_id: str, body: PostBody) -> dict:
     if len(body.caption) > 20000:
         raise HTTPException(400, "The caption is too long.")
     schedule = _schedule(body.scheduleAt)
-    result = None
-    if body.mediaId:
-        result = media.get_result(body.mediaId)
-        if not result:
-            raise HTTPException(400, "The upload expired or is still processing — add the file again.")
+    result = _combined_media(_media_ids(body.mediaId, body.mediaIds), strict=True)
     if not result and not body.caption.strip():
-        raise HTTPException(400, "Add a video or write a caption.")
+        raise HTTPException(400, "Add a photo or video, or write a caption.")
     mine = {a["id"]: a for a in await model_accounts(model_id)}
     chosen = [mine.get(i) for i in body.accountIds]
     if not all(chosen):

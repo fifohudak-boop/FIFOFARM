@@ -16,21 +16,29 @@ from .settings import DEFAULT_PREFERENCES
 # connect: 'oauth' opens the network's sign-in page; 'credentials' asks for a handle + app password;
 # 'postiz' means connect it inside Postiz itself (still postable here once connected).
 # media: 'video' = needs a video, 'any' = needs a photo or video, 'none' = text ok.
+# carousel: how many photos/videos one post can hold. 'videos' = videos may be in it, 'mixed' = photos and
+# videos together, 'firstOnly' = the network takes just the first one. No 'carousel' = one item only.
+_PHOTOS = lambda most: {"max": most, "videos": False}  # noqa: E731 - tiny table helper
+_ANY = lambda most: {"max": most, "videos": True, "mixed": True}  # noqa: E731
 PLATFORMS: dict[str, dict[str, Any]] = {
     "youtube": {"name": "YouTube", "connect": "oauth", "media": "video"},
-    "tiktok": {"name": "TikTok", "connect": "oauth", "media": "any"},
-    "instagram-standalone": {"name": "Instagram", "connect": "oauth", "media": "any"},
-    "instagram": {"name": "Instagram (via Facebook Page)", "connect": "oauth", "media": "any"},
-    "facebook": {"name": "Facebook Page", "connect": "oauth", "media": "none"},
-    "threads": {"name": "Threads", "connect": "oauth", "media": "none", "maxVideoSeconds": 300},
-    "x": {"name": "X (Twitter)", "connect": "oauth", "media": "none", "maxVideoSeconds": 140},
-    "linkedin": {"name": "LinkedIn", "connect": "oauth", "media": "none"},
-    "linkedin-page": {"name": "LinkedIn Page", "connect": "oauth", "media": "none"},
-    "pinterest": {"name": "Pinterest", "connect": "oauth", "media": "any", "needsBoard": True},
+    "tiktok": {"name": "TikTok", "connect": "oauth", "media": "any", "carousel": _PHOTOS(35)},
+    "instagram-standalone": {"name": "Instagram", "connect": "oauth", "media": "any", "carousel": _ANY(10)},
+    "instagram": {"name": "Instagram (via Facebook Page)", "connect": "oauth", "media": "any",
+                  "carousel": _ANY(10)},
+    "facebook": {"name": "Facebook Page", "connect": "oauth", "media": "none", "carousel": _PHOTOS(10)},
+    "threads": {"name": "Threads", "connect": "oauth", "media": "none", "maxVideoSeconds": 300,
+                "carousel": _ANY(10)},
+    "x": {"name": "X (Twitter)", "connect": "oauth", "media": "none", "maxVideoSeconds": 140,
+          "carousel": _PHOTOS(4)},
+    "linkedin": {"name": "LinkedIn", "connect": "oauth", "media": "none", "carousel": _PHOTOS(9)},
+    "linkedin-page": {"name": "LinkedIn Page", "connect": "oauth", "media": "none", "carousel": _PHOTOS(9)},
+    "pinterest": {"name": "Pinterest", "connect": "oauth", "media": "any", "needsBoard": True,
+                  "carousel": {"firstOnly": True}},
     "bluesky": {"name": "Bluesky", "connect": "credentials", "media": "none", "maxVideoSeconds": 180,
-                "maxVideoBytes": 100 * 1024 * 1024},
-    "mastodon": {"name": "Mastodon", "connect": "oauth", "media": "none"},
-    "telegram": {"name": "Telegram", "connect": "postiz", "media": "none"},
+                "maxVideoBytes": 100 * 1024 * 1024, "carousel": _PHOTOS(4)},
+    "mastodon": {"name": "Mastodon", "connect": "oauth", "media": "none", "carousel": _PHOTOS(4)},
+    "telegram": {"name": "Telegram", "connect": "postiz", "media": "none", "carousel": _ANY(10)},
     "nostr": {"name": "Nostr", "connect": "postiz", "media": "none"},
     "vk": {"name": "VK", "connect": "postiz", "media": "none"},
 }
@@ -168,15 +176,61 @@ def build_settings(account: dict, *, title: str | None, caption: str, media_name
     return base
 
 
+def combine(results: list[dict]) -> dict | None:
+    """Several uploaded photos/videos become one carousel, in the order given. One stays as it is."""
+    if not results:
+        return None
+    if len(results) == 1:
+        return results[0]
+    items: list[dict] = []
+    for r in results:
+        if r["kind"] == "video":
+            items.append({"kind": "video", "id": r["video"]["id"], "path": r["video"]["path"],
+                          "cover": r.get("cover"), "previewUrl": r.get("previewUrl"),
+                          "durationSeconds": r.get("durationSeconds", 0), "sizeBytes": r.get("sizeBytes", 0),
+                          "name": r.get("name")})
+        else:
+            for img in r.get("images", []):
+                items.append({"kind": "image", "id": img["id"], "path": img["path"],
+                              "previewUrl": img.get("path"), "sizeBytes": r.get("sizeBytes", 0),
+                              "name": r.get("name")})
+    first = results[0]
+    videos = sum(1 for i in items if i["kind"] == "video")
+    return {
+        "kind": "carousel",
+        "items": items,
+        "count": len(items),
+        "videos": videos,
+        "name": f"Carousel of {len(items)}",
+        "previewUrl": first.get("previewUrl"),
+        "width": first.get("width"),
+        "height": first.get("height"),
+        "sizeBytes": sum(i["sizeBytes"] for i in items),
+    }
+
+
+def _media_item(item: dict) -> dict:
+    return {"id": item["id"], "path": item["path"]}
+
+
 def media_for(account: dict, media: dict | None) -> list[dict]:
     """What media each network gets. Pinterest needs a cover image next to a video."""
     if not media:
         return []
+    pinterest = account["identifier"] == "pinterest"
     if media["kind"] == "video":
         video = {"id": media["video"]["id"], "path": media["video"]["path"]}
-        if account["identifier"] == "pinterest" and media.get("cover"):
+        if pinterest and media.get("cover"):
             return [video, {"id": media["cover"]["id"], "path": media["cover"]["path"]}]
         return [video]
+    if media["kind"] == "carousel":
+        items = media.get("items", [])
+        if pinterest and items:  # a pin is one picture (or one video with its cover)
+            first = items[0]
+            if first["kind"] == "video" and first.get("cover"):
+                return [_media_item(first), {"id": first["cover"]["id"], "path": first["cover"]["path"]}]
+            return [_media_item(first)]
+        return [_media_item(i) for i in items]
     return [{"id": img["id"], "path": img["path"]} for img in media.get("images", [])]
 
 
@@ -201,6 +255,8 @@ def preflight(account: dict, media: dict | None, prefs: dict) -> tuple[list[str]
         problems.append(f"{platform['name']} needs a photo or video.")
     if platform.get("needsBoard") and not (prefs.get("pinterestBoards") or {}).get(account["id"]):
         problems.append("Pick a Pinterest board for this account (Accounts page).")
+    if media and media["kind"] == "carousel":
+        _carousel_checks(platform, media, problems, warnings)
     if media and media["kind"] == "video":
         max_s = platform.get("maxVideoSeconds")
         if max_s and media.get("durationSeconds", 0) > max_s:
@@ -210,6 +266,32 @@ def preflight(account: dict, media: dict | None, prefs: dict) -> tuple[list[str]
         if max_b and media.get("sizeBytes", 0) > max_b:
             warnings.append(f"{platform['name']} accepts videos up to {round(max_b / 1048576)} MB.")
     return problems, warnings
+
+
+def _carousel_checks(platform: dict, media: dict, problems: list[str], warnings: list[str]) -> None:
+    name = platform["name"]
+    items = media.get("items", [])
+    count = len(items)
+    has_video = any(i["kind"] == "video" for i in items)
+    has_photo = any(i["kind"] == "image" for i in items)
+    rule = platform.get("carousel")
+    if platform["media"] == "video":
+        return  # "needs a video" already says it
+    if not rule:
+        problems.append(f"{name} can't post a carousel. Post one photo or video to it instead.")
+        return
+    if rule.get("firstOnly"):
+        warnings.append(f"{name} gets only the first one.")
+        return
+    if count > rule["max"]:
+        problems.append(f"{name} takes up to {rule['max']} in one post; this carousel has {count}.")
+    if has_video and not rule.get("videos"):
+        problems.append(f"{name} carousels can only be photos.")
+    elif has_video and has_photo and not rule.get("mixed"):
+        problems.append(f"{name} can't mix photos and videos in one post.")
+    max_s = platform.get("maxVideoSeconds")
+    if max_s and any(i["kind"] == "video" and i.get("durationSeconds", 0) > max_s for i in items):
+        warnings.append(f"{name} usually accepts videos up to {format_duration(max_s)}; one of these is longer.")
 
 
 def iso_now() -> str:

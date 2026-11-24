@@ -363,6 +363,37 @@ def test_ai_studio_makes_a_video_with_wan(client, tmp_path):
         settings.save({"alibabaApiKey": "", "alibabaRegion": "intl", "alibabaWorkspace": "", "studioKeys": {}})
 
 
+def make_photo(path: Path, color: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([find_ffmpeg(), "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c={color}:s=1080x1350",
+                    "-frames:v", "1", str(path)], check=True)
+    return path
+
+
+def test_post_photos_as_a_carousel(client, engine, tmp_path):
+    mike = state["mike"]
+    assert client.put("/api/accounts/x1/model", json={"modelId": mike}, headers=H).status_code == 200
+    ids = []
+    for n, color in enumerate(("red", "green", "blue")):
+        file = make_photo(tmp_path / f"slide{n}.png", color)
+        job = client.post("/api/media", params={"name": file.name}, content=file.read_bytes(), headers=H)
+        done = wait_job(client, job.json()["id"])
+        assert done["status"] == "ready" and done["result"]["kind"] == "images", done
+        ids.append(done["id"])
+    preview = client.post(f"/api/m/{mike}/preview", json={"caption": "swipe", "mediaIds": ids}, headers=H).json()
+    assert preview["tt2"]["problems"] == [] and preview["x1"]["problems"] == []
+    posted = client.post(f"/api/m/{mike}/posts", json={"accountIds": ["tt2", "x1"], "caption": "swipe →",
+                                                         "mediaIds": ids}, headers=H)
+    assert posted.status_code == 201, posted.text
+    batch = posted.json()
+    assert batch["media"]["kind"] == "carousel" and batch["media"]["count"] == 3
+    sent = next(b for b in engine.created if b["posts"][0]["integration"]["id"] == "tt2")
+    assert len(sent["posts"][0]["value"][0]["image"]) == 3
+    # An expired upload in the middle stops the post instead of silently dropping a slide.
+    gone = client.post(f"/api/m/{mike}/posts", json={"accountIds": ["tt2"], "mediaIds": [ids[0], "nope"]}, headers=H)
+    assert gone.status_code == 400
+
+
 def test_removing_a_model_keeps_your_files(client):
     from hub import reels_api
 

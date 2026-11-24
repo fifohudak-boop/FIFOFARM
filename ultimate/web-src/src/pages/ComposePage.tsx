@@ -16,12 +16,17 @@ const draftKey = (modelId: string) => `ultimate.draft.${modelId}`;
 const selectionKey = (modelId: string) => `ultimate.unselected.${modelId}`;
 const TITLE_PLATFORMS = new Set(['youtube', 'pinterest', 'facebook']);
 
-type MediaState =
-  | { phase: 'empty' }
-  | { phase: 'uploading'; name: string; fraction: number }
-  | { phase: 'processing'; job: MediaJob }
-  | { phase: 'ready'; job: MediaJob }
-  | { phase: 'failed'; name: string; error: string };
+// Each photo or video you add is one slot. One slot posts as a photo or a video; two or more post as a
+// carousel, in the order shown.
+type Slot =
+  | { key: string; phase: 'uploading'; name: string; fraction: number }
+  | { key: string; phase: 'processing'; name: string; job: MediaJob }
+  | { key: string; phase: 'ready'; name: string; job: MediaJob }
+  | { key: string; phase: 'failed'; name: string; error: string };
+type UploadingSlot = Extract<Slot, { phase: 'uploading' }>;
+
+let slotCounter = 0;
+const newKey = () => `slot-${Date.now().toString(36)}-${(slotCounter++).toString(36)}`;
 
 function readStorage<T>(key: string, fallback: T): T {
   try {
@@ -61,7 +66,8 @@ export function ComposePage({
   const [caption, setCaption] = useState<string>(draft.caption);
   const [title, setTitle] = useState<string>(draft.title);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
-  const [media, setMedia] = useState<MediaState>({ phase: 'empty' });
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const [dragKey, setDragKey] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [when, setWhen] = useState<'now' | 'later'>('now');
   const [scheduleAt, setScheduleAt] = useState(() => toLocalInputValue(new Date(Date.now() + 60 * 60 * 1000)));
@@ -82,20 +88,24 @@ export function ComposePage({
   useEffect(() => writeStorage(draftKey(model.id), { caption, title }), [model.id, caption, title]);
   useEffect(() => writeStorage(selectionKey(model.id), [...unselected]), [model.id, unselected]);
 
-  const mediaId = media.phase === 'ready' ? media.job.id : null;
-  const mediaResult = media.phase === 'ready' ? media.job.result : null;
+  const readyIds = slots.flatMap((s) => (s.phase === 'ready' ? [s.job.id] : []));
+  const readyKey = readyIds.join(',');
+  const preparing = slots.some((s) => s.phase === 'uploading' || s.phase === 'processing');
+  const failedSlots = slots.filter((s) => s.phase === 'failed');
+  const mediaReady = slots.length > 0 && readyIds.length === slots.length;
+  const isCarousel = slots.length > 1;
 
   // Ask the server what would happen per account (length, shortening, problems).
   useEffect(() => {
     if (!accounts?.length) return;
     const handle = setTimeout(() => {
       api
-        .preview(model.id, { caption, captions: overrides, mediaId })
+        .preview(model.id, { caption, captions: overrides, mediaIds: readyKey ? readyKey.split(',') : [] })
         .then(setPreview)
         .catch(() => {});
     }, 300);
     return () => clearTimeout(handle);
-  }, [model.id, accounts, caption, overrides, mediaId]);
+  }, [model.id, accounts, caption, overrides, readyKey]);
 
   const usable = useMemo(() => (accounts ?? []).filter((a) => a.supported && !a.disabled), [accounts]);
   const selected = usable.filter((a) => !unselected.has(a.id));
@@ -122,38 +132,55 @@ export function ComposePage({
     });
   }
 
-  const pollJob = useCallback((job: MediaJob) => {
-    const tick = async () => {
-      try {
-        const latest = await api.mediaJob(job.id);
-        if (latest.status === 'ready') setMedia({ phase: 'ready', job: latest });
-        else if (latest.status === 'failed') setMedia({ phase: 'failed', name: latest.name, error: latest.error ?? 'Failed' });
-        else {
-          setMedia({ phase: 'processing', job: latest });
-          setTimeout(tick, 1000);
-        }
-      } catch (err) {
-        setMedia({ phase: 'failed', name: job.name, error: (err as Error).message });
-      }
-    };
-    tick();
-  }, []);
+  const setSlot = useCallback(
+    (key: string, next: Slot) => setSlots((prev) => prev.map((s) => (s.key === key ? next : s))),
+    []
+  );
 
-  // A file from the model's library (a Reel Finder find, an AI Studio video…): no upload needed.
-  const openLibraryFile = useCallback(
-    async (path: string) => {
-      setResult(null);
-      const name = path.split('/').pop() || 'video';
-      setMedia({ phase: 'uploading', name, fraction: 1 });
-      try {
-        const job = await api.localMedia(model.id, path);
-        setMedia({ phase: 'processing', job });
-        pollJob(job);
-      } catch (err) {
-        setMedia({ phase: 'failed', name, error: (err as Error).message });
-      }
+  const pollJob = useCallback(
+    (key: string, job: MediaJob) => {
+      const tick = async () => {
+        try {
+          const latest = await api.mediaJob(job.id);
+          if (latest.status === 'ready') setSlot(key, { key, phase: 'ready', name: latest.name, job: latest });
+          else if (latest.status === 'failed')
+            setSlot(key, { key, phase: 'failed', name: latest.name, error: latest.error ?? 'Failed' });
+          else {
+            setSlot(key, { key, phase: 'processing', name: latest.name, job: latest });
+            setTimeout(tick, 1000);
+          }
+        } catch (err) {
+          setSlot(key, { key, phase: 'failed', name: job.name, error: (err as Error).message });
+        }
+      };
+      tick();
     },
-    [model.id, pollJob]
+    [setSlot]
+  );
+
+  // Files from the model's library (Reel Finder finds, AI Studio photos and videos…): no upload needed.
+  const addLibraryFiles = useCallback(
+    (paths: string[], replace = false) => {
+      if (!paths.length) return;
+      setResult(null);
+      const fresh: UploadingSlot[] = paths.map((path) => ({
+        key: newKey(),
+        phase: 'uploading',
+        name: path.split('/').pop() || 'file',
+        fraction: 1,
+      }));
+      setSlots((prev) => [...(replace ? [] : prev), ...fresh]);
+      fresh.forEach(async (slot, i) => {
+        try {
+          const job = await api.localMedia(model.id, paths[i]);
+          setSlot(slot.key, { key: slot.key, phase: 'processing', name: slot.name, job });
+          pollJob(slot.key, job);
+        } catch (err) {
+          setSlot(slot.key, { key: slot.key, phase: 'failed', name: slot.name, error: (err as Error).message });
+        }
+      });
+    },
+    [model.id, pollJob, setSlot]
   );
 
   // Another tool sent a file here ("Post" on a Reel Finder find, the library or AI Studio).
@@ -161,20 +188,52 @@ export function ComposePage({
   useEffect(() => {
     if (handoff && handoff.at !== handled.current) {
       handled.current = handoff.at;
-      openLibraryFile(handoff.path);
+      addLibraryFiles([handoff.path], true);
     }
-  }, [handoff, openLibraryFile]);
+  }, [handoff, addLibraryFiles]);
 
-  async function handleFile(file: File) {
+  function addFiles(files: File[]) {
+    if (!files.length) return;
     setResult(null);
-    setMedia({ phase: 'uploading', name: file.name, fraction: 0 });
-    try {
-      const job = await uploadMedia(file, (fraction) => setMedia({ phase: 'uploading', name: file.name, fraction }));
-      setMedia({ phase: 'processing', job });
-      pollJob(job);
-    } catch (err) {
-      setMedia({ phase: 'failed', name: file.name, error: (err as Error).message });
-    }
+    const fresh: UploadingSlot[] = files.map((file) => ({ key: newKey(), phase: 'uploading', name: file.name, fraction: 0 }));
+    setSlots((prev) => [...prev, ...fresh]);
+    fresh.forEach(async (slot, i) => {
+      try {
+        const job = await uploadMedia(files[i], (fraction) => setSlot(slot.key, { ...slot, fraction }));
+        setSlot(slot.key, { key: slot.key, phase: 'processing', name: slot.name, job });
+        pollJob(slot.key, job);
+      } catch (err) {
+        setSlot(slot.key, { key: slot.key, phase: 'failed', name: slot.name, error: (err as Error).message });
+      }
+    });
+  }
+
+  function removeSlot(key: string) {
+    setSlots((prev) => prev.filter((s) => s.key !== key));
+  }
+
+  function moveSlot(key: string, delta: number) {
+    setSlots((prev) => {
+      const from = prev.findIndex((s) => s.key === key);
+      const to = from + delta;
+      if (from < 0 || to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      const [slot] = next.splice(from, 1);
+      next.splice(to, 0, slot);
+      return next;
+    });
+  }
+
+  function moveSlotTo(key: string, targetKey: string) {
+    setSlots((prev) => {
+      const from = prev.findIndex((s) => s.key === key);
+      const to = prev.findIndex((s) => s.key === targetKey);
+      if (from < 0 || to < 0 || from === to) return prev;
+      const next = [...prev];
+      const [slot] = next.splice(from, 1);
+      next.splice(to, 0, slot);
+      return next;
+    });
   }
 
   async function submit() {
@@ -184,7 +243,7 @@ export function ComposePage({
       const batch = await api.post(model.id, {
         caption,
         title,
-        mediaId,
+        mediaIds: readyIds,
         accountIds: ready.map((a) => a.id),
         scheduleAt: when === 'later' ? new Date(scheduleAt).toISOString() : null,
         captions: Object.fromEntries(Object.entries(overrides).filter(([id]) => ready.some((a) => a.id === id))),
@@ -202,7 +261,7 @@ export function ComposePage({
     setCaption('');
     setTitle('');
     setOverrides({});
-    setMedia({ phase: 'empty' });
+    setSlots([]);
     setWhen('now');
   }
 
@@ -240,18 +299,38 @@ export function ComposePage({
     );
   }
 
-  const preparing = media.phase === 'uploading' || media.phase === 'processing';
-  const canPost = !posting && ready.length > 0 && !preparing && (media.phase === 'ready' || caption.trim().length > 0);
+  const canPost =
+    !posting &&
+    ready.length > 0 &&
+    !preparing &&
+    failedSlots.length === 0 &&
+    (mediaReady || (slots.length === 0 && caption.trim().length > 0));
   const blocker = preparing
-    ? 'Preparing your video…'
-    : media.phase !== 'ready' && !caption.trim()
-      ? 'Add a video or write a caption'
-      : ready.length === 0
+    ? isCarousel
+      ? 'Preparing your carousel…'
+      : 'Preparing your file…'
+    : failedSlots.length > 0
+      ? 'Remove the files that failed'
+      : slots.length === 0 && !caption.trim()
+        ? 'Add a photo, video or caption'
+        : ready.length === 0
         ? selected.length === 0
           ? 'Choose accounts to post to'
           : 'Fix the red notes first'
         : null;
   const plural = ready.length === 1 ? '' : 's';
+  const readyResults = slots.flatMap((s) => (s.phase === 'ready' && s.job.result ? [s.job.result] : []));
+  const videoCount = readyResults.filter((r) => r.kind === 'video').length;
+  const photoCount = readyResults.length - videoCount;
+  const single = slots.length === 1 ? slots[0] : null;
+  const singleResult = single?.phase === 'ready' ? single.job.result : null;
+  const pickFiles = () => fileInput.current?.click();
+  const dropFiles = (e: React.DragEvent) => {
+    if (!e.dataTransfer.files.length) return; // a slide being dragged, not a file
+    e.preventDefault();
+    setDragOver(false);
+    addFiles([...e.dataTransfer.files]);
+  };
   const changed = Object.keys(overrides).length;
   const whenText = new Date(scheduleAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
@@ -263,11 +342,15 @@ export function ComposePage({
       {picking && (
         <LibraryPicker
           model={model}
-          kinds={['found', 'generated', 'references']}
+          kinds={['found', 'generated', 'edited', 'photos', 'references']}
           title="Choose from the library"
           onPick={(item) => {
             setPicking(false);
-            openLibraryFile(item.path);
+            addLibraryFiles([item.path]);
+          }}
+          onPickMany={(items) => {
+            setPicking(false);
+            addLibraryFiles(items.map((i) => i.path));
           }}
           onClose={() => setPicking(false)}
           onGoLibrary={onGoLibrary}
@@ -276,107 +359,197 @@ export function ComposePage({
       <section className="card sheet">
         <Step
           n={1}
-          title="Video"
-          done={media.phase === 'ready'}
+          title={isCarousel ? 'Carousel' : 'Photo or video'}
+          done={mediaReady}
           aside={
-            (media.phase === 'empty' || media.phase === 'failed') && (
-              <button className="btn small" onClick={() => setPicking(true)}>
-                <Icon name="folder" size={14} />
-                From {model.name}'s library
-              </button>
-            )
+            <button className="btn small" onClick={() => setPicking(true)}>
+              <Icon name="folder" size={14} />
+              {slots.length ? 'Add from library' : `From ${model.name}'s library`}
+            </button>
           }
         >
-          {media.phase === 'empty' || media.phase === 'failed' ? (
+          {slots.length === 0 ? (
+            <div
+              className={`drop${dragOver ? ' over' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={pickFiles}
+              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && pickFiles()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={dropFiles}
+            >
+              <span className="dropzone-icon" aria-hidden="true">
+                <Icon name="upload" size={18} />
+              </span>
+              <strong>Drop photos or a video here</strong>
+              <span className="dropzone-hint">Add two or more to post a carousel</span>
+            </div>
+          ) : single ? (
             <>
-              <div
-                className={`drop${dragOver ? ' over' : ''}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => fileInput.current?.click()}
-                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileInput.current?.click()}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragOver(true);
-                }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDragOver(false);
-                  const file = e.dataTransfer.files[0];
-                  if (file) handleFile(file);
-                }}
-              >
-                <span className="dropzone-icon" aria-hidden="true">
-                  <Icon name="upload" size={18} />
-                </span>
-                <strong>Drop a video here</strong>
-                <span className="dropzone-hint">or click to choose</span>
-              </div>
-              {media.phase === 'failed' && (
-                <div className="notice error">
-                  {media.name}: {media.error}
+              {single.phase === 'uploading' ? (
+                <div className="working">
+                  <div className="row">
+                    <strong>{single.fraction >= 1 ? `Opening ${single.name}` : `Uploading ${single.name}`}</strong>
+                    <span className="spacer" />
+                    <span className="muted">{Math.round(single.fraction * 100)}%</span>
+                  </div>
+                  <div className="progress">
+                    <div style={{ width: `${single.fraction * 100}%` }} />
+                  </div>
+                </div>
+              ) : single.phase === 'processing' ? (
+                <div className="working">
+                  <div className="row">
+                    <strong>{single.job.step}…</strong>
+                    <span className="spacer" />
+                    <span className="muted">{single.job.progress}%</span>
+                  </div>
+                  <div className="progress">
+                    <div style={{ width: `${single.job.progress}%` }} />
+                  </div>
+                </div>
+              ) : single.phase === 'failed' ? (
+                <div className="notice error row">
+                  <span style={{ flex: 1 }}>
+                    {single.name}: {single.error}
+                  </span>
+                  <button className="btn small" onClick={() => removeSlot(single.key)}>
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <div className="media-ready">
+                  {singleResult?.previewUrl && <img src={singleResult.previewUrl} alt="" />}
+                  <div className="media-ready-main">
+                    <strong>{single.job.name}</strong>
+                    <div className="facts">
+                      {singleResult?.kind === 'video' ? (
+                        <>
+                          <span>{formatDuration(singleResult.durationSeconds ?? 0)}</span>
+                          <span>
+                            {singleResult.width}×{singleResult.height}
+                          </span>
+                          <span>{formatBytes(singleResult.sizeBytes)}</span>
+                        </>
+                      ) : (
+                        <span>
+                          Photo, {singleResult?.width}×{singleResult?.height}
+                        </span>
+                      )}
+                      {singleResult?.reencoded && <span>converted for all networks</span>}
+                    </div>
+                  </div>
+                  <button className="btn small" onClick={() => removeSlot(single.key)}>
+                    Remove
+                  </button>
+                </div>
+              )}
+              {single.phase !== 'failed' && (
+                <div className="row">
+                  <button className="btn small" onClick={pickFiles}>
+                    <Icon name="plus" size={14} />
+                    Add more for a carousel
+                  </button>
                 </div>
               )}
             </>
-          ) : media.phase === 'uploading' ? (
-            <div className="working">
-              <div className="row">
-                <strong>{media.fraction >= 1 ? `Opening ${media.name}` : `Uploading ${media.name}`}</strong>
-                <span className="spacer" />
-                <span className="muted">{Math.round(media.fraction * 100)}%</span>
-              </div>
-              <div className="progress">
-                <div style={{ width: `${media.fraction * 100}%` }} />
-              </div>
-            </div>
-          ) : media.phase === 'processing' ? (
-            <div className="working">
-              <div className="row">
-                <strong>{media.job.step}…</strong>
-                <span className="spacer" />
-                <span className="muted">{media.job.progress}%</span>
-              </div>
-              <div className="progress">
-                <div style={{ width: `${media.job.progress}%` }} />
-              </div>
-            </div>
           ) : (
-            <div className="media-ready">
-              {mediaResult?.previewUrl && <img src={mediaResult.previewUrl} alt="" />}
-              <div className="media-ready-main">
-                <strong>{media.job.name}</strong>
-                <div className="facts">
-                  {mediaResult?.kind === 'video' ? (
-                    <>
-                      <span>{formatDuration(mediaResult.durationSeconds ?? 0)}</span>
-                      <span>
-                        {mediaResult.width}×{mediaResult.height}
+            <>
+              <div
+                className={`slides${dragOver ? ' over' : ''}`}
+                onDragOver={(e) => {
+                  if (e.dataTransfer.types.includes('Files')) {
+                    e.preventDefault();
+                    setDragOver(true);
+                  }
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={dropFiles}
+              >
+                {slots.map((slot, i) => {
+                  const res = slot.phase === 'ready' ? slot.job.result : null;
+                  const fraction =
+                    slot.phase === 'uploading' ? slot.fraction : slot.phase === 'processing' ? slot.job.progress / 100 : 1;
+                  return (
+                    <div
+                      key={slot.key}
+                      className={`slide${slot.phase === 'failed' ? ' failed' : ''}${dragKey === slot.key ? ' dragging' : ''}`}
+                      draggable
+                      onDragStart={(e) => {
+                        setDragKey(slot.key);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragEnter={() => dragKey && dragKey !== slot.key && moveSlotTo(dragKey, slot.key)}
+                      onDragOver={(e) => dragKey && e.preventDefault()}
+                      onDragEnd={() => setDragKey(null)}
+                      title={slot.name}
+                    >
+                      <span className="slide-thumb">
+                        {res?.previewUrl ? (
+                          <img src={res.previewUrl} alt="" draggable={false} />
+                        ) : slot.phase === 'failed' ? (
+                          <Icon name="x" size={18} />
+                        ) : (
+                          <span className="spinner" aria-hidden="true" />
+                        )}
+                        {res?.kind === 'video' && (
+                          <span className="slide-badge">
+                            <Icon name="play" size={9} />
+                            {formatDuration(res.durationSeconds ?? 0)}
+                          </span>
+                        )}
+                        {(slot.phase === 'uploading' || slot.phase === 'processing') && (
+                          <span className="slide-progress">
+                            <span style={{ width: `${Math.round(fraction * 100)}%` }} />
+                          </span>
+                        )}
                       </span>
-                      <span>{formatBytes(mediaResult.sizeBytes)}</span>
-                    </>
-                  ) : (
-                    <span>
-                      Photo, {mediaResult?.width}×{mediaResult?.height}
-                    </span>
-                  )}
-                  {mediaResult?.reencoded && <span>converted for all networks</span>}
-                </div>
+                      <span className="slide-num">{i + 1}</span>
+                      <button type="button" className="slide-remove" aria-label={`Remove ${slot.name}`} onClick={() => removeSlot(slot.key)}>
+                        <Icon name="x" size={12} />
+                      </button>
+                      <span className="slide-move">
+                        <button type="button" aria-label="Move earlier" disabled={i === 0} onClick={() => moveSlot(slot.key, -1)}>
+                          <Icon name="chevron" size={13} className="flip" />
+                        </button>
+                        <button type="button" aria-label="Move later" disabled={i === slots.length - 1} onClick={() => moveSlot(slot.key, 1)}>
+                          <Icon name="chevron" size={13} />
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
+                <button type="button" className="slide slide-add" onClick={pickFiles} aria-label="Add photos or videos">
+                  <Icon name="plus" size={18} />
+                  <span>Add</span>
+                </button>
               </div>
-              <button className="btn small" onClick={() => setMedia({ phase: 'empty' })}>
-                Replace
-              </button>
-            </div>
+              <div className="facts">
+                {photoCount > 0 && <span>{photoCount === 1 ? '1 photo' : `${photoCount} photos`}</span>}
+                {videoCount > 0 && <span>{videoCount === 1 ? '1 video' : `${videoCount} videos`}</span>}
+                <span>Drag to change the order</span>
+              </div>
+              {failedSlots.map((slot) => (
+                <div key={slot.key} className="notice error">
+                  {slot.name}: {slot.phase === 'failed' ? slot.error : ''}
+                </div>
+              ))}
+            </>
           )}
           <input
             ref={fileInput}
             type="file"
             accept="video/*,image/*"
+            multiple
             hidden
             onChange={(e) => {
-              const file = e.target.files?.[0];
+              const files = [...(e.target.files ?? [])];
               e.target.value = '';
-              if (file) handleFile(file);
+              addFiles(files);
             }}
           />
         </Step>
@@ -559,7 +732,11 @@ export function ComposePage({
         >
           <CtaButton
             icon={when === 'now' ? 'send' : 'calendar'}
-            label={posting ? 'Sending…' : blocker ?? `${when === 'now' ? 'Post' : 'Schedule'} to ${ready.length} account${plural}`}
+            label={
+              posting
+                ? 'Sending…'
+                : blocker ?? `${when === 'now' ? 'Post' : 'Schedule'}${isCarousel ? ' carousel' : ''} to ${ready.length} account${plural}`
+            }
             win={when === 'now' ? 'Send it live' : 'Set it and forget it'}
             busy={posting}
             disabled={!canPost}
