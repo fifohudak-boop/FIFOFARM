@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from hub.mediainfo import parse
 from hub.platforms import (
-    build_post_request, build_settings, count_length, fit_caption, platform_catalog, preflight, to_postiz_html,
-    youtube_title,
+    build_post_request, build_settings, combine, count_length, fit_caption, media_for, platform_catalog, preflight,
+    to_postiz_html, youtube_title,
 )
 
 VIDEO = {
@@ -135,3 +135,50 @@ def test_reads_what_ffmpeg_says_about_a_file():
   Stream #0:1: Video: mjpeg (Baseline), yuvj420p(pc, bt470bg/unknown/unknown), 500x500 [SAR 1:1 DAR 1:1], 90k tbr, 90k tbn (attached pic)
 """)
     assert not cover.has_video and cover.audio_codec == "mp3"
+
+
+def photo(n: int) -> dict:
+    return {"kind": "images", "name": f"p{n}.jpg", "images": [{"id": f"i{n}", "path": f"https://p.example/i{n}.jpg"}],
+            "previewUrl": f"https://p.example/i{n}.jpg", "width": 1080, "height": 1350, "sizeBytes": 200_000}
+
+
+def test_one_photo_posts_as_a_photo():
+    single = combine([photo(1)])
+    assert single["kind"] == "images"
+    assert media_for(account("instagram-standalone"), single) == [{"id": "i1", "path": "https://p.example/i1.jpg"}]
+    assert preflight(account("tiktok"), single, {}) == ([], [])
+    assert preflight(account("youtube"), single, {})[0] == ["YouTube needs a video."]
+
+
+def test_several_photos_become_one_carousel_in_order():
+    carousel = combine([photo(1), photo(2), photo(3)])
+    assert carousel["kind"] == "carousel" and carousel["count"] == 3 and carousel["videos"] == 0
+    assert carousel["previewUrl"] == "https://p.example/i1.jpg"
+    assert [m["id"] for m in media_for(account("instagram-standalone"), carousel)] == ["i1", "i2", "i3"]
+    assert [m["id"] for m in media_for(account("tiktok"), carousel)] == ["i1", "i2", "i3"]
+    body, _ = build_post_request(account("instagram-standalone"), {"caption": "hi", "media": carousel}, {}, 2200)
+    assert [m["id"] for m in body["posts"][0]["value"][0]["image"]] == ["i1", "i2", "i3"]
+    for ident in ("instagram-standalone", "instagram", "tiktok", "facebook", "threads", "x"):
+        assert preflight(account(ident), carousel, {}) == ([], []), ident
+
+
+def test_carousel_limits_per_network():
+    five = combine([photo(n) for n in range(5)])
+    assert "X (Twitter) takes up to 4" in preflight(account("x"), five, {})[0][0]
+    eleven = combine([photo(n) for n in range(11)])
+    assert "up to 10" in preflight(account("instagram-standalone"), eleven, {})[0][0]
+    assert preflight(account("tiktok"), eleven, {}) == ([], [])  # TikTok photo posts take up to 35
+    assert preflight(account("youtube"), five, {})[0] == ["YouTube needs a video."]
+    problems, warnings = preflight(account("pinterest"), five, {"pinterestBoards": {"acc-pinterest": "b1"}})
+    assert problems == [] and warnings == ["Pinterest gets only the first one."]
+    assert media_for(account("pinterest"), five) == [{"id": "i0", "path": "https://p.example/i0.jpg"}]
+    assert "can't post a carousel" in preflight(account("vk"), five, {})[0][0]
+
+
+def test_photos_and_videos_together():
+    mixed = combine([photo(1), VIDEO])
+    assert mixed["kind"] == "carousel" and mixed["videos"] == 1
+    assert [m["id"] for m in media_for(account("instagram-standalone"), mixed)] == ["i1", "v1"]
+    assert preflight(account("instagram-standalone"), mixed, {}) == ([], [])
+    assert preflight(account("tiktok"), mixed, {})[0] == ["TikTok carousels can only be photos."]
+    assert preflight(account("facebook"), mixed, {})[0] == ["Facebook Page carousels can only be photos."]

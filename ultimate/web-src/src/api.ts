@@ -124,14 +124,14 @@ export const api = {
   mediaJob: (id: string) => request<MediaJob>(`/api/media/${enc(id)}`),
   localMedia: (model: string, path: string) =>
     request<MediaJob>(`${m(model)}/media/local`, { method: 'POST', body: { path } }),
-  preview: (model: string, body: { caption: string; captions: Record<string, string>; mediaId: string | null }) =>
+  preview: (model: string, body: { caption: string; captions: Record<string, string>; mediaIds: string[] }) =>
     request<Record<string, AccountPreview>>(`${m(model)}/preview`, { method: 'POST', body }),
   post: (
     model: string,
     body: {
       caption: string;
       title: string;
-      mediaId: string | null;
+      mediaIds: string[];
       accountIds: string[];
       scheduleAt: string | null;
       captions: Record<string, string>;

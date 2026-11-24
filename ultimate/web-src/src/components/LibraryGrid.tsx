@@ -29,18 +29,29 @@ export function LibraryGrid({
   items,
   renderActions,
   onPick,
+  selected,
 }: {
   model: Model;
   items: LibraryItem[];
   renderActions?: (item: LibraryItem) => React.ReactNode;
   onPick?: (item: LibraryItem) => void;
+  // Picking several (a carousel): the chosen paths, in the order they were chosen.
+  selected?: string[];
 }) {
   return (
     <div className="lib-grid">
       {items.map((item) =>
         onPick ? (
-          <button key={item.path} type="button" className="lib-item pickable" onClick={() => onPick(item)} title={item.path}>
+          <button
+            key={item.path}
+            type="button"
+            className={`lib-item pickable${selected?.includes(item.path) ? ' picked' : ''}`}
+            onClick={() => onPick(item)}
+            title={item.path}
+            aria-pressed={selected ? selected.includes(item.path) : undefined}
+          >
             <Thumb model={model} item={item} />
+            {selected?.includes(item.path) && <span className="pick-order">{selected.indexOf(item.path) + 1}</span>}
             <span className="lib-name">{item.name}</span>
             <span className="lib-meta facts">
               {item.folder && <span>{item.folder}</span>}

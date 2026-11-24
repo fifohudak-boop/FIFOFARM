@@ -120,9 +120,20 @@ export interface AccountPreview {
   warnings: string[];
 }
 
+export interface CarouselItem {
+  kind: 'image' | 'video';
+  previewUrl?: string;
+  durationSeconds?: number;
+  name?: string;
+}
+
 export interface MediaResult {
-  kind: 'video' | 'images';
+  kind: 'video' | 'images' | 'carousel';
   name: string;
+  // A carousel: several photos (and, where the network allows, videos) in one post.
+  items?: CarouselItem[];
+  count?: number;
+  videos?: number;
   previewUrl: string;
   durationSeconds?: number;
   width: number;
